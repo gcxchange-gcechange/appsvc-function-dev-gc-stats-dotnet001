@@ -1,16 +1,35 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Azure.Identity;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using System.Text.Json;
 
 namespace GCStats
 {
     static class Users
     {
-
-        public static async Task<IEnumerable<Models.User>> GetUsers(ILogger _logger)
+        public static async Task StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
-            var allUsers = new List<Models.User>();
-            var graph = new Auth().GraphAuth(_logger);
+            var storageAccountUrl = config["storageAccountUrl"];
+            var isLocal = config["isLocal"];
+            var containerName = "users";
+            var blobName = $"users-{DateTime.UtcNow:yyyy/MM/dd}.json";
+
+            var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
+            var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+            await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+            var blobClient = containerClient.GetBlobClient(blobName);
+
+            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+            using var jsonWriter = new Utf8JsonWriter(blobStream);
+
+            jsonWriter.WriteStartArray();
+
+            var graph = new Auth().GraphAuth(log);
+            int count = 0;
 
             var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
             {
@@ -20,23 +39,31 @@ namespace GCStats
             });
 
             var pageIterator = PageIterator<User, UserCollectionResponse>
-            .CreatePageIterator(
-                graph,
-                usersPage!,
-                user =>
-                {
-                    allUsers.Add(new Models.User(user));
-                    return true; 
-                },
-                requestConfiguration =>
-                {
-                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                    return requestConfiguration;
-                });
+                .CreatePageIterator(
+                    graph,
+                    usersPage!,
+                    user =>
+                    {
+                        jsonWriter.WriteStartObject();
+                        jsonWriter.WriteString("id", user.Id ?? string.Empty);
+                        jsonWriter.WriteString("mail", user.Mail ?? string.Empty);
+                        jsonWriter.WriteEndObject();
+                        count++;
+                        return true;
+                    },
+                    requestConfiguration =>
+                    {
+                        requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                        return requestConfiguration;
+                    });
 
             await pageIterator.IterateAsync();
 
-            return allUsers;
+            jsonWriter.WriteEndArray();
+            await jsonWriter.FlushAsync();
+            await blobStream.FlushAsync();
+
+            log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
         }
     }
 }
