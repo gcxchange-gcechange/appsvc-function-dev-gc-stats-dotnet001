@@ -9,8 +9,16 @@ using System.Text.Json;
 
 namespace GCStats
 {
+    public record UserRecord(string Id, string Mail);
+
     static class Users
     {
+        private static readonly JsonSerializerOptions JsonOptions = new()
+        {
+            WriteIndented = false,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
         public static async Task StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
             var storageAccountUrl = config["storageAccountUrl"];
@@ -44,10 +52,8 @@ namespace GCStats
                     usersPage!,
                     user =>
                     {
-                        jsonWriter.WriteStartObject();
-                        jsonWriter.WriteString("id", user.Id ?? string.Empty);
-                        jsonWriter.WriteString("mail", user.Mail ?? string.Empty);
-                        jsonWriter.WriteEndObject();
+                        var record = new UserRecord(Id: user.Id ?? string.Empty, Mail: user.Mail ?? string.Empty);
+                        JsonSerializer.Serialize(jsonWriter, record, JsonOptions);
                         count++;
                         return true;
                     },
