@@ -13,57 +13,67 @@ namespace GCStats
 
     static class Users
     {
+        public static readonly string[] UserQuerySelectParams = ["id", "mail"];
+
         public static async Task StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
-            var storageAccountUrl = config["storageAccountUrl"];
-            var isLocal = config["isLocal"];
-            var containerName = "users";
-            var blobName = $"users-{DateTime.UtcNow:yyyy/MM/dd}.json";
-
-            var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-            var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
-            await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
-            var blobClient = containerClient.GetBlobClient(blobName);
-
-            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-            using var jsonWriter = new Utf8JsonWriter(blobStream);
-
-            jsonWriter.WriteStartArray();
-
-            var graph = new Auth().GraphAuth(log);
-            int count = 0;
-
-            var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
+            try
             {
-                requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                requestConfiguration.QueryParameters.Top = 999;
-                requestConfiguration.QueryParameters.Select = ["id", "mail"];
-            });
+                var storageAccountUrl = config["storageAccountUrl"];
+                var isLocal = config["isLocal"];
+                var containerName = "users";
+                var blobName = $"users-{DateTime.UtcNow:yyyy/MM/dd}.json";
 
-            var pageIterator = PageIterator<User, UserCollectionResponse>
-                .CreatePageIterator(
-                    graph,
-                    usersPage!,
-                    user =>
-                    {
-                        var record = new UserRecord(Id: user.Id ?? string.Empty, Mail: user.Mail ?? string.Empty);
-                        JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
-                        count++;
-                        return true;
-                    },
-                    requestConfiguration =>
-                    {
-                        requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                        return requestConfiguration;
-                    });
+                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
+                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+                var blobClient = containerClient.GetBlobClient(blobName);
 
-            await pageIterator.IterateAsync();
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+                using var jsonWriter = new Utf8JsonWriter(blobStream);
 
-            jsonWriter.WriteEndArray();
-            await jsonWriter.FlushAsync();
-            await blobStream.FlushAsync();
+                jsonWriter.WriteStartArray();
 
-            log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
+                var graph = new Auth().GraphAuth(log);
+                int count = 0;
+
+                var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
+                {
+                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                    requestConfiguration.QueryParameters.Top = 999;
+                    requestConfiguration.QueryParameters.Select = Users.UserQuerySelectParams;
+                });
+
+                var pageIterator = PageIterator<User, UserCollectionResponse>
+                    .CreatePageIterator(
+                        graph,
+                        usersPage!,
+                        user =>
+                        {
+                            var record = new UserRecord(Id: user.Id ?? string.Empty, Mail: user.Mail ?? string.Empty);
+                            JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
+                            count++;
+                            return true;
+                        },
+                        requestConfiguration =>
+                        {
+                            requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                            return requestConfiguration;
+                        });
+
+                await pageIterator.IterateAsync();
+
+                jsonWriter.WriteEndArray();
+                await jsonWriter.FlushAsync();
+                await blobStream.FlushAsync();
+
+                log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
+            }
+            catch (Exception ex)
+            {
+                log.LogError("StreamUsersToBlobAsync failed");
+                log.LogError(ex.Message);
+            }
         }
     }
 }

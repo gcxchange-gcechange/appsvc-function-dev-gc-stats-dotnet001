@@ -78,6 +78,8 @@ namespace GCStats
 
                             JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
 
+                            log.LogInformation($"Processed community #{++count}: {record.DisplayName} (ID: {record.Id})");
+
                             return true;
                         },
                         requestConfiguration =>
@@ -108,16 +110,18 @@ namespace GCStats
                 var ownersTask = GetDirectoryObjectPageAsUsersAsync(
                     () => graph.Groups[groupId].Owners.GetAsync(rc =>
                     {
+                        rc.Headers.Add("ConsistencyLevel", "eventual");
                         rc.QueryParameters.Top = 999;
-                        rc.QueryParameters.Select = ["id", "mail"];
+                        rc.QueryParameters.Select = Users.UserQuerySelectParams;
                     }),
                     graph);
 
                 var membersTask = GetDirectoryObjectPageAsUsersAsync(
                     () => graph.Groups[groupId].Members.GetAsync(rc =>
                     {
+                        rc.Headers.Add("ConsistencyLevel", "eventual");
                         rc.QueryParameters.Top = 999;
-                        rc.QueryParameters.Select = ["id", "mail"];
+                        rc.QueryParameters.Select = Users.UserQuerySelectParams;
                     }),
                     graph);
 
