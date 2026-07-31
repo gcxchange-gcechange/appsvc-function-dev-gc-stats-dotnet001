@@ -26,71 +26,79 @@ namespace GCStats
     {
         public static async Task StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
         {
-            var storageAccountUrl = config["storageAccountUrl"];
-            var isLocal = config["isLocal"];
-            var containerName = "communities";
-            var blobName = $"communities-{DateTime.UtcNow:yyyy/MM/dd}.json";
-
-            var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-            var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
-            await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
-            var blobClient = containerClient.GetBlobClient(blobName);
-
-            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-            using var jsonWriter = new Utf8JsonWriter(blobStream);
-
-            jsonWriter.WriteStartArray();
-
-            var graph = new Auth().GraphAuth(log);
-            int count = 0;
-
-            var groupsPage = await graph.Groups.GetAsync((requestConfiguration) =>
+            try
             {
-                requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                requestConfiguration.QueryParameters.Top = 999;
-                requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "groupTypes", "assignedLabels", "resourceProvisioningOptions"];
-                requestConfiguration.QueryParameters.Filter = "resourceProvisioningOptions/Any(x:x eq 'Team')";
-            });
+                var storageAccountUrl = config["storageAccountUrl"];
+                var isLocal = config["isLocal"];
+                var containerName = "communities";
+                var blobName = $"communities-{DateTime.UtcNow:yyyy/MM/dd}.json";
 
-            var pageIterator = PageIterator<Group, GroupCollectionResponse>
-                .CreatePageIterator(
-                    graph,
-                    groupsPage!,
-                    async group =>
-                    {
-                        var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
+                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
+                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+                var blobClient = containerClient.GetBlobClient(blobName);
 
-                        var record = new CommunityRecord(
-                            Id: group.Id ?? string.Empty,
-                            DisplayName: group.DisplayName ?? string.Empty,
-                            OwnerList: owners,
-                            MemberList: members,
-                            GroupTypes: group.GroupTypes ?? new List<string>(),
-                            SensitivityLabel: new SensitivityLabelRecord(
-                                Id: group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty,
-                                DisplayName: group.AssignedLabels?.FirstOrDefault()?.DisplayName ?? string.Empty
-                            ),
-                            CreationDate: group.CreatedDateTime ?? DateTime.MinValue,
-                            LastActivityDate: DateTime.MinValue // TODO
-                        );
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+                using var jsonWriter = new Utf8JsonWriter(blobStream);
 
-                        JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
-                        count++;
-                        return true;
-                    },
-                    requestConfiguration =>
-                    {
-                        requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                        return requestConfiguration;
-                    });
+                jsonWriter.WriteStartArray();
 
-            await pageIterator.IterateAsync();
+                var graph = new Auth().GraphAuth(log);
+                int count = 0;
 
-            jsonWriter.WriteEndArray();
-            await jsonWriter.FlushAsync();
-            await blobStream.FlushAsync();
+                var groupsPage = await graph.Groups.GetAsync((requestConfiguration) =>
+                {
+                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                    requestConfiguration.QueryParameters.Top = 999;
+                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "groupTypes", "assignedLabels", "resourceProvisioningOptions"];
+                    requestConfiguration.QueryParameters.Filter = "resourceProvisioningOptions/Any(x:x eq 'Team')";
+                });
 
-            log.LogInformation("Streamed {Count} communities to blob {BlobName}", count, blobName);
+                var pageIterator = PageIterator<Group, GroupCollectionResponse>
+                    .CreatePageIterator(
+                        graph,
+                        groupsPage!,
+                        async group =>
+                        {
+                            var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
+
+                            var record = new CommunityRecord(
+                                Id: group.Id ?? string.Empty,
+                                DisplayName: group.DisplayName ?? string.Empty,
+                                OwnerList: owners,
+                                MemberList: members,
+                                GroupTypes: group.GroupTypes ?? new List<string>(),
+                                SensitivityLabel: new SensitivityLabelRecord(
+                                    Id: group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty,
+                                    DisplayName: group.AssignedLabels?.FirstOrDefault()?.DisplayName ?? string.Empty
+                                ),
+                                CreationDate: group.CreatedDateTime ?? DateTime.MinValue,
+                                LastActivityDate: DateTime.MinValue // TODO
+                            );
+
+                            JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
+
+                            return true;
+                        },
+                        requestConfiguration =>
+                        {
+                            requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                            return requestConfiguration;
+                        });
+
+                await pageIterator.IterateAsync();
+
+                jsonWriter.WriteEndArray();
+                await jsonWriter.FlushAsync();
+                await blobStream.FlushAsync();
+
+                log.LogInformation("Streamed {Count} communities to blob {BlobName}", count, blobName);
+            }
+            catch (Exception ex) 
+            {
+                log.LogError("StreamCommunitiesToBlobAsync failed.");
+                log.LogError(ex.Message.ToString());
+            }
         }
 
         private static async Task<(UserRecord[] Owners, UserRecord[] Members)> GetOwnersAndMembersAsync(GraphServiceClient graph, string groupId, ILogger log)

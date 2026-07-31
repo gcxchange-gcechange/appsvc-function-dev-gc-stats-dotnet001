@@ -1,6 +1,4 @@
-﻿using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Azure.Functions.Worker;
+﻿using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -16,9 +14,9 @@ namespace GCStats
         }
 
         [Function("TotalCommunities")]
-        public async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "get")] HttpRequest req)
+        public async Task Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
         {
-            _logger.LogInformation("C# HTTP trigger function processed a request.");
+            _logger.LogInformation("TotalCommunities timer trigger executed at: {Time}", DateTime.UtcNow);
 
             IConfiguration config = new ConfigurationBuilder()
                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -27,7 +25,10 @@ namespace GCStats
 
             await Communities.StreamCommunitiesToBlobAsync(_logger, config);
 
-            return new OkObjectResult("Welcome to Azure Functions!");
+            if (timer.ScheduleStatus is not null)
+            {
+                _logger.LogInformation("Next scheduled run: {Next}", timer.ScheduleStatus.Next);
+            }
         }
     }
 }
