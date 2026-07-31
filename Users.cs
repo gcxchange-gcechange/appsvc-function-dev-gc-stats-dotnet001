@@ -13,12 +13,6 @@ namespace GCStats
 
     static class Users
     {
-        private static readonly JsonSerializerOptions JsonOptions = new()
-        {
-            WriteIndented = false,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-
         public static async Task StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
             var storageAccountUrl = config["storageAccountUrl"];
@@ -53,7 +47,7 @@ namespace GCStats
                     user =>
                     {
                         var record = new UserRecord(Id: user.Id ?? string.Empty, Mail: user.Mail ?? string.Empty);
-                        JsonSerializer.Serialize(jsonWriter, record, JsonOptions);
+                        JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
                         count++;
                         return true;
                     },
