@@ -19,8 +19,9 @@ namespace GCStats
         {
             try
             {
-                var storageAccountUrl = config["storageAccountUrl"];
-                var isLocal = config["isLocal"];
+                var storageAccountUrl = config["storageAccountUrl"] ?? string.Empty;
+                var exceptionUsersArray = config["exceptionUsersArray"] ?? string.Empty;
+                var isLocal = config["isLocal"] ?? string.Empty;
                 var containerName = "users";
                 var blobName = $"users-{DateTime.UtcNow:yyyy/MM/dd}.json";
 
@@ -50,9 +51,13 @@ namespace GCStats
                         usersPage!,
                         user =>
                         {
-                            var record = new UserRecord(Id: user.Id ?? string.Empty, Mail: user.Mail ?? string.Empty);
-                            JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
-                            count++;
+                            if (!exceptionUsersArray.Contains(user.Id)) 
+                            {
+                                var record = new UserRecord(Id: user.Id ?? string.Empty, Mail: user.Mail ?? string.Empty);
+                                JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
+                                count++;
+                            }
+                            
                             return true;
                         },
                         requestConfiguration =>

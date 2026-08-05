@@ -28,8 +28,9 @@ namespace GCStats
         {
             try
             {
-                var storageAccountUrl = config["storageAccountUrl"];
-                var isLocal = config["isLocal"];
+                var storageAccountUrl = config["storageAccountUrl"] ?? string.Empty;
+                var exceptionGroupsArray = config["exceptionGroupsArray"] ?? string.Empty;
+                var isLocal = config["isLocal"] ?? string.Empty;
                 var containerName = "communities";
                 var blobName = $"communities-{DateTime.UtcNow:yyyy/MM/dd}.json";
 
@@ -60,25 +61,28 @@ namespace GCStats
                         groupsPage!,
                         async group =>
                         {
-                            var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
+                            if (!exceptionGroupsArray.Contains(group.Id))
+                            {
+                                var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
 
-                            var record = new CommunityRecord(
-                                Id: group.Id ?? string.Empty,
-                                DisplayName: group.DisplayName ?? string.Empty,
-                                OwnerList: owners,
-                                MemberList: members,
-                                GroupTypes: group.GroupTypes ?? new List<string>(),
-                                SensitivityLabel: new SensitivityLabelRecord(
-                                    Id: group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty,
-                                    DisplayName: group.AssignedLabels?.FirstOrDefault()?.DisplayName ?? string.Empty
-                                ),
-                                CreationDate: group.CreatedDateTime ?? DateTime.MinValue,
-                                LastActivityDate: DateTime.MinValue // TODO
-                            );
+                                var record = new CommunityRecord(
+                                    Id: group.Id ?? string.Empty,
+                                    DisplayName: group.DisplayName ?? string.Empty,
+                                    OwnerList: owners,
+                                    MemberList: members,
+                                    GroupTypes: group.GroupTypes ?? new List<string>(),
+                                    SensitivityLabel: new SensitivityLabelRecord(
+                                        Id: group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty,
+                                        DisplayName: group.AssignedLabels?.FirstOrDefault()?.DisplayName ?? string.Empty
+                                    ),
+                                    CreationDate: group.CreatedDateTime ?? DateTime.MinValue,
+                                    LastActivityDate: DateTime.MinValue // TODO
+                                );
 
-                            JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
+                                JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
 
-                            log.LogInformation($"Processed community #{++count}: {record.DisplayName} (ID: {record.Id})");
+                                log.LogInformation($"Processed community #{++count}: {record.DisplayName} (ID: {record.Id})");
+                            }
 
                             return true;
                         },
