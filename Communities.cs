@@ -28,9 +28,9 @@ namespace GCStats
         {
             try
             {
-                var storageAccountUrl = config["storageAccountUrl"] ?? string.Empty;
-                var exceptionGroupsArray = config["exceptionGroupsArray"] ?? string.Empty;
-                var isLocal = config["isLocal"] ?? string.Empty;
+                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
+                var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
+                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
                 var containerName = "communities";
                 var blobName = $"communities-{DateTime.UtcNow:yyyy/MM/dd}.json";
 
@@ -61,12 +61,12 @@ namespace GCStats
                         groupsPage!,
                         async group =>
                         {
-                            if (!exceptionGroupsArray.Contains(group.Id))
+                            if (group.Id != null && !exceptionGroupsArray.Contains(group.Id))
                             {
                                 var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
 
                                 var record = new CommunityRecord(
-                                    Id: group.Id ?? string.Empty,
+                                    Id: group.Id,
                                     DisplayName: group.DisplayName ?? string.Empty,
                                     OwnerList: owners,
                                     MemberList: members,

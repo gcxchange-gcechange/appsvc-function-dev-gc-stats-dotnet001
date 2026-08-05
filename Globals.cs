@@ -1,9 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
-using System.Threading.Tasks;
 
 namespace GCStats
 {
@@ -16,5 +13,19 @@ namespace GCStats
             WriteIndented = false,
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
+
+        public static string GetAppSetting(string settingName, ILogger log, IConfiguration config, bool isMandatory = true)
+        {
+            var value = config[settingName];
+
+            if (value == null && isMandatory)
+            {
+                var msg = $"{settingName} is missing from the environment variables or local.settings.json";
+                log.LogError(msg);
+                throw new MissingFieldException(msg);
+            }
+
+            return value ?? string.Empty;
+        }
     }
 }
