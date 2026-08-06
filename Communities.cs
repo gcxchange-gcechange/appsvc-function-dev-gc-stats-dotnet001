@@ -1,10 +1,13 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
+using CsvHelper;
+using GCStats.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using System.Globalization;
 using System.Text.Json;
 
 namespace GCStats
@@ -28,6 +31,21 @@ namespace GCStats
         {
             try
             {
+                var graph = new Auth().GraphAuth(log);
+
+                // Get teams activity report
+                using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod("D7").GetAsync();
+                using var teamsUsageReader = new StreamReader(teamsUsageStream);
+                using var teamsUsage = new CsvReader(teamsUsageReader, CultureInfo.InvariantCulture);
+                var teamsActivityRecords = teamsUsage.GetRecords<TeamActivityRecord>();
+
+                // Get sharepoint usage report
+                using var sharepointUsageStream = await graph.Reports.GetSharePointSiteUsageDetailWithPeriod("D7").GetAsync();
+                using var sharepointUsageReader = new StreamReader(sharepointUsageStream);
+                using var sharepointUsage = new CsvReader(sharepointUsageReader, CultureInfo.InvariantCulture);
+                var sharepointUsageRecords = sharepointUsage.GetRecords<SharePointUsageRecord>();
+
+                // Open stream to blob storage
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
@@ -43,10 +61,9 @@ namespace GCStats
                 using var jsonWriter = new Utf8JsonWriter(blobStream);
 
                 jsonWriter.WriteStartArray();
-
-                var graph = new Auth().GraphAuth(log);
                 int count = 0;
 
+                // Get all groups with Teams provisioning 
                 var groupsPage = await graph.Groups.GetAsync((requestConfiguration) =>
                 {
                     requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
@@ -63,8 +80,30 @@ namespace GCStats
                         {
                             if (group.Id != null && !exceptionGroupsArray.Contains(group.Id))
                             {
+                                DateTime lastActivityDate = DateTime.MinValue;
+                                var site = await graph.Groups[group.Id].Sites["root"].GetAsync();
+
+                                // Find the team owner/members
                                 var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
 
+                                // Check reports for last activity data
+                                var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id));
+                                var sharePointUsageRecord = site != null && site.Id != null ?
+                                    sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(site.Id)) :
+                                    new SharePointUsageRecord();
+
+                                if (teamsActivityRecord != null && teamsActivityRecord.LastActivityDate != null)
+                                    lastActivityDate = (DateTime)teamsActivityRecord.LastActivityDate;
+                                else
+                                    log.LogWarning($"Coudln't find teams activity for GroupId: {group.Id}");
+
+                                if (sharePointUsageRecord != null && sharePointUsageRecord.LastActivityDate != null)
+                                    lastActivityDate = lastActivityDate > (DateTime)sharePointUsageRecord.LastActivityDate ? 
+                                    lastActivityDate : (DateTime)sharePointUsageRecord.LastActivityDate;
+                                else
+                                    log.LogWarning($"Couldn't find SharePoint site activity for GroupId: {group.Id}");
+
+                                // Write to blob storage
                                 var record = new CommunityRecord(
                                     Id: group.Id,
                                     DisplayName: group.DisplayName ?? string.Empty,
@@ -76,7 +115,7 @@ namespace GCStats
                                         DisplayName: group.AssignedLabels?.FirstOrDefault()?.DisplayName ?? string.Empty
                                     ),
                                     CreationDate: group.CreatedDateTime ?? DateTime.MinValue,
-                                    LastActivityDate: DateTime.MinValue // TODO
+                                    LastActivityDate: lastActivityDate
                                 );
 
                                 JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
