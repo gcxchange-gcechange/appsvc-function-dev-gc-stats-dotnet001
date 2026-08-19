@@ -27,7 +27,7 @@ namespace GCStats
 
     static class Communities
     {
-        public static async Task StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
+        public static async Task<string> StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
         {
             try
             {
@@ -138,12 +138,16 @@ namespace GCStats
                 await blobStream.FlushAsync();
 
                 log.LogInformation("Streamed {Count} communities to blob {BlobName}", count, blobName);
+
+                return blobName;
             }
             catch (Exception ex) 
             {
                 log.LogError("StreamCommunitiesToBlobAsync failed.");
                 log.LogError(ex.Message.ToString());
             }
+
+            return string.Empty;
         }
 
         private static async Task<(UserRecord[] Owners, UserRecord[] Members)> GetOwnersAndMembersAsync(GraphServiceClient graph, string groupId, ILogger log)

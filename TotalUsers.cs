@@ -14,7 +14,8 @@ namespace GCStats
         }
 
         [Function("TotalUsers")]
-        public async Task Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        [QueueOutput("process-total-users", Connection = "AzureWebJobsStorage")]
+        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
         {
             _logger.LogInformation("TotalUsers timer trigger executed at: {Time}", DateTime.UtcNow);
 
@@ -23,12 +24,14 @@ namespace GCStats
                 .AddEnvironmentVariables()
                 .Build();
 
-            await Users.StreamUsersToBlobAsync(_logger, config);
+            var blobName = await Users.StreamUsersToBlobAsync(_logger, config);
 
             if (timer.ScheduleStatus is not null)
             {
                 _logger.LogInformation("Next scheduled run: {Next}", timer.ScheduleStatus.Next);
             }
+
+            return blobName;
         }
     }
 }

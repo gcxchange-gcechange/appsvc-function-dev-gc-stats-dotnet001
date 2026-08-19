@@ -15,7 +15,7 @@ namespace GCStats
     {
         public static readonly string[] UserQuerySelectParams = ["id", "mail"];
 
-        public static async Task StreamUsersToBlobAsync(ILogger log, IConfiguration config)
+        public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
             try
             {
@@ -73,12 +73,16 @@ namespace GCStats
                 await blobStream.FlushAsync();
 
                 log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
+
+                return blobName;
             }
             catch (Exception ex)
             {
                 log.LogError("StreamUsersToBlobAsync failed");
                 log.LogError(ex.Message);
             }
+
+            return string.Empty;
         }
     }
 }
