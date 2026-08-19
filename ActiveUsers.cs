@@ -2,12 +2,16 @@
 using Azure.Identity;
 using Azure.Monitor.Query.Logs;
 using Azure.Monitor.Query.Logs.Models;
+using Azure.Security.KeyVault.Secrets;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Azure.Security.KeyVault.Secrets;
+using System.Text.Json;
 
 
 namespace GCStats
@@ -15,9 +19,7 @@ namespace GCStats
 
     public record ActiveUsersRecord(
      string Id,
-     string DisplayName,
-     string Email,
-     string UserPrincipalName
+     string Email
    );
 
     public class ActiveUsers
@@ -40,80 +42,104 @@ namespace GCStats
             string secretName = Globals.GetAppSetting("secretName", log, _config);
             string keyVaultUrl = Globals.GetAppSetting("keyVaultUrl", log, _config);
             string workspaceId = Globals.GetAppSetting("workspaceId", log, _config);
+            var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, _config);
+
+            var isLocal = Globals.GetAppSetting("isLocal", log, _config, false);
+
+            //get client secret from keyVault
+
+            var secretClient = new SecretClient(
+                new Uri(keyVaultUrl),
+                isLocal == "true"
+                    ? new AzureCliCredential()
+                    : new DefaultAzureCredential()
+                );
+
+            KeyVaultSecret secret = secretClient.GetSecret(secretName);
+
+            // Credentials for LogsQueryClient
+            var credential = new ClientSecretCredential(
+               tenantId,
+               clientId,
+               secret.Value
+            );
+
+            var client = new LogsQueryClient(credential);
+
+            // Create Blob Storage client 
+
+            var blobServiceClient = new BlobServiceClient(
+                 new Uri(storageAccountUrl),
+                 isLocal == "true"
+                     ? new AzureCliCredential()
+                     : new DefaultAzureCredential()
+             );
 
             try
             {
-                var isLocal = Globals.GetAppSetting("isLocal", log, _config, false);
-                var graph = new Auth().GraphAuth(log);
 
-                var secretClient = new SecretClient(
-                    new Uri(keyVaultUrl),
-                    isLocal == "true"
-                        ? new AzureCliCredential()
-                        : new DefaultAzureCredential()
-                );
 
-                KeyVaultSecret secret = secretClient.GetSecret(secretName);
+                //blob container name and blob name for storing the active users list
+                var containerName = "activeusers";
+                var blobName = $"{containerName}-{DateTime.UtcNow:yyyy/MM/dd}.json";
+                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+                var blobClient = containerClient.GetBlobClient(blobName);
 
-                var credential = new ClientSecretCredential(
-                    tenantId,
-                    clientId,
-                    secret.Value
-                );
 
-                var client = new LogsQueryClient(credential);
-
+                //get active users from the logs using the LogsQueryClient
+               
+                string query = @"
+                  SigninLogs | where TimeGenerated >= ago(24h)
+                    | where UserPrincipalName != UserId 
+                    | where ResourceDisplayName == 'Office 365 SharePoint Online' or ResourceDisplayName contains 'Microsoft Teams' 
+                    | where AppDisplayName in ('Microsoft Teams', 'Office 365 SharePoint Online')
+                    | summarize LastCall = max(TimeGenerated) by UserDisplayName, UserPrincipalName, UserId, UserType, ResourceDisplayName, AppDisplayName 
+                    | distinct UserId, UserDisplayName, UserPrincipalName, ResourceDisplayName, AppDisplayName, LastCall 
+                    | order by LastCall asc
+                ";
 
                 Response<LogsQueryResult> response = await client.QueryWorkspaceAsync(
 
                     workspaceId: workspaceId,
-                    query: "SigninLogs | where ResultType == 0 | summarize ActiveUsers = dcount(UserPrincipalName) by bin(TimeGenerated, 1d)",
-                    timeRange: new LogsQueryTimeRange(TimeSpan.FromDays(7))
+                    query: query,
+                    timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24))
                 );
+                LogsTable table = response.Value.Table;
+                //log.LogInformation($"Response: {table}");
 
-                foreach (var table in response.Value.AllTables)
+                // Collect users from the Logs table
+                var users = new List<ActiveUsersRecord>();
+
+                foreach (var row in table.Rows)
                 {
-                    foreach (var row in table.Rows)
-                    {
-                        foreach (var value in row)
-                        {
-                            Console.Write($"{value} | ");
-                        }
-                         
-                        Console.WriteLine();
-                    }
+                    var userId = row["UserId"]?.ToString() ?? "";
+                    //log.LogInformation($"UserId: {userId}");
+                    var email = row["UserPrincipalName"]?.ToString() ?? "";
+                    users.Add(new ActiveUsersRecord(userId, email));
                 }
 
-
-
-                // Get users 
-                var activeUsers = await graph.Users.GetAsync(rc =>
-                    {
-                        rc.Headers.Add("ConsistencyLevel", "eventual");
-                        rc.QueryParameters.Top = 100;
-                        //rc.QueryParameters.Select = new[] { "id", "displayName", "mail", "userPrincipalName" };
-                    }
-                );
-             
-
-                var users = new List<ActiveUsersRecord>();
 
                 log.LogInformation(users.Count + " active users retrieved.");
 
-                if (activeUsers?.Value != null)
-                {
-                    foreach (var user in activeUsers.Value)
-                    {
-                        users.Add(new ActiveUsersRecord(
-                            user.Id ?? "",
-                            user.DisplayName ?? "",
-                            user.Mail ?? "",
-                            user.UserPrincipalName ?? ""
-                        ));
-                    }
-                }
+                //save data to container
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
 
-                
+                await JsonSerializer.SerializeAsync(
+                    blobStream,
+                    users,
+                    new JsonSerializerOptions
+                    {
+                        WriteIndented = true
+                    }
+                );
+
+                await blobStream.FlushAsync();
+
+                log.LogInformation(
+                    $"Saved {users.Count} active users to blob: {containerName}/{blobName}"
+                );
+
                 return users;
             }
             catch (Exception ex)
@@ -124,14 +150,24 @@ namespace GCStats
         }
 
         [Function("ActiveUsers")]
-        public async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "get")] HttpRequest req)
+
+        public async Task Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo myTimer)
         {
-        
+            _logger.LogInformation($"Timer trigger function executed at: {DateTime.UtcNow}");
 
             var activeUsers = await GetActiveUsers(_logger);
 
-            return new OkObjectResult(activeUsers);
+            _logger.LogInformation($"Retrieved {activeUsers.Count} active users.");
         }
+
+        //public async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "get")] HttpRequest req)
+        //{
+        
+
+        //    var activeUsers = await GetActiveUsers(_logger);
+
+        //    return new OkObjectResult(activeUsers);
+        //}
     }
 }
 
