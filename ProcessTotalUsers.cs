@@ -1,8 +1,10 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Data;
 using System.Text.Json;
 
 namespace GCStats
@@ -33,12 +35,54 @@ namespace GCStats
                 var blobClient = containerClient.GetBlobClient(blobName);
 
                 var response = await blobClient.DownloadContentAsync();
+                var users = JsonSerializer.Deserialize<List<UserRecord>>(response.Value.Content.ToString(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
-                var users = JsonSerializer.Deserialize<List<UserRecord>>(response.Value.Content.ToString());
+                if (users != null && users.Count > 0)
+                {
+                    var dataTable = new DataTable();
 
-                // TODO: Transform into data format for warehouse upload
-                // TODO: Upload data to fabric data warehouse 
+                    dataTable.Columns.Add("Id", typeof(string));
+                    dataTable.Columns.Add("Mail", typeof(string));
+                    dataTable.Columns.Add("SnapshotDate", typeof(string));
 
+                    var splitBlobName = blobName.Split('-').Skip(1);
+                    var snapshotDate = String.Join("-", splitBlobName);
+
+                    foreach (var user in users)
+                    {
+                        dataTable.Rows.Add(user.Id, user.Mail, String.Join("-", snapshotDate));
+                    }
+
+                    var warehouseServer = Globals.GetAppSetting("warehouseServer", _logger, _config);
+                    var warehouseDatabase = Globals.GetAppSetting("warehouseDatabase", _logger, _config);
+
+                    var connectionString =
+                    $"Server={warehouseServer};" +
+                    $"Database={warehouseDatabase};" +
+                    "Authentication=Active Directory Default;" +
+                    "Encrypt=True;";
+
+                    await using var connection = new SqlConnection(connectionString);
+
+                    await connection.OpenAsync();
+
+                    using var bulkCopy = new SqlBulkCopy(connection);
+                    bulkCopy.DestinationTableName = "dbo.TotalUsers";
+                    bulkCopy.BatchSize = 50000;
+                    bulkCopy.BulkCopyTimeout = 0;
+
+                    bulkCopy.ColumnMappings.Add("Id", "Id");
+                    bulkCopy.ColumnMappings.Add("Mail", "Mail");
+                    bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
+
+                    await bulkCopy.WriteToServerAsync(dataTable);
+
+                    _logger.LogInformation("Successfully uploaded {count} users to dbo.TotalUsers", users.Count);
+                }
+                else
+                {
+                    throw new DataException("No users to upload");
+                }
             }
             catch (Exception ex) 
             {
