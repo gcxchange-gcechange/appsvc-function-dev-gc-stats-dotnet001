@@ -87,6 +87,7 @@ namespace GCStats
             catch (Exception ex) 
             {
                 _logger.LogError(ex.Message);
+                throw;
             }
 
             _logger.LogInformation("Finished processing {blobName}", blobName);
