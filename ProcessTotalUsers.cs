@@ -43,23 +43,25 @@ namespace GCStats
 
                     dataTable.Columns.Add("Id", typeof(string));
                     dataTable.Columns.Add("Mail", typeof(string));
-                    dataTable.Columns.Add("SnapshotDate", typeof(string));
+                    dataTable.Columns.Add("SnapshotDate", typeof(DateTime));
 
-                    var splitBlobName = blobName.Split('-').Skip(1);
-                    var snapshotDate = String.Join("-", splitBlobName);
+                    var splitBlobName = blobName.Split('.').First().Split('-').Skip(1);
+                    var snapshotDate = DateTime.Parse(String.Join("-", splitBlobName));
 
                     foreach (var user in users)
                     {
-                        dataTable.Rows.Add(user.Id, user.Mail, String.Join("-", snapshotDate));
+                        dataTable.Rows.Add(user.Id, user.Mail, snapshotDate);
                     }
 
-                    var warehouseServer = Globals.GetAppSetting("warehouseServer", _logger, _config);
-                    var warehouseDatabase = Globals.GetAppSetting("warehouseDatabase", _logger, _config);
+                    var warehouseServer = Globals.GetAppSetting("fabricWarehouseServer", _logger, _config);
+                    var warehouseDatabase = Globals.GetAppSetting("fabricWarehouseDatabase", _logger, _config);
 
+                    // requires TCP 1433
                     var connectionString =
-                    $"Server={warehouseServer};" +
-                    $"Database={warehouseDatabase};" +
+                    $"Server=tcp:{warehouseServer},1433;" +
+                    $"Initial Catalog={warehouseDatabase};" +
                     "Authentication=Active Directory Default;" +
+                    "TrustServerCertificate=False;" +
                     "Encrypt=True;";
 
                     await using var connection = new SqlConnection(connectionString);
