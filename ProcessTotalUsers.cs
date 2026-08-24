@@ -1,4 +1,5 @@
-﻿using Azure.Identity;
+﻿using Azure.Core;
+using Azure.Identity;
 using Azure.Storage.Blobs;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
@@ -60,13 +61,21 @@ namespace GCStats
                     var connectionString =
                     $"Server=tcp:{warehouseServer},1433;" +
                     $"Initial Catalog={warehouseDatabase};" +
-                    "Authentication=Active Directory Default;" +
                     "TrustServerCertificate=False;" +
                     "Encrypt=True;";
 
                     await using var connection = new SqlConnection(connectionString);
 
+                    var tokenCredential = isLocal == "true" ? (TokenCredential)new AzureCliCredential() : new ManagedIdentityCredential();
+
+                    var tokenContext = new TokenRequestContext(new[] { "https://database.windows.net/.default" });
+                    var accessToken = await tokenCredential.GetTokenAsync(tokenContext, CancellationToken.None);
+
+                    connection.AccessToken = accessToken.Token;
+
                     await connection.OpenAsync();
+
+                    _logger.LogInformation("Connected to SQL Server: {server}, Database: {database}", warehouseServer, warehouseDatabase);
 
                     using var bulkCopy = new SqlBulkCopy(connection);
                     bulkCopy.DestinationTableName = "dbo.TotalUsers";
