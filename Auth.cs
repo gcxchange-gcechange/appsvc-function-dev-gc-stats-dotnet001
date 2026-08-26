@@ -62,31 +62,39 @@ namespace GCStats
 
         public static async Task<SqlConnection> GetSqlConnection(ILogger log, IConfiguration config)
         {
-            var warehouseServer = Globals.GetAppSetting("fabricWarehouseServer", log, config);
-            var warehouseDatabase = Globals.GetAppSetting("fabricWarehouseDatabase", log, config);
-            var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+            try
+            {
+                var warehouseServer = Globals.GetAppSetting("fabricWarehouseServer", log, config);
+                var warehouseDatabase = Globals.GetAppSetting("fabricWarehouseDatabase", log, config);
+                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
 
-            // requires TCP 1433
-            var connectionString =
-            $"Server=tcp:{warehouseServer},1433;" +
-            $"Initial Catalog={warehouseDatabase};" +
-            "TrustServerCertificate=False;" +
-            "Encrypt=True;";
+                // requires TCP 1433
+                var connectionString =
+                $"Server=tcp:{warehouseServer},1433;" +
+                $"Initial Catalog={warehouseDatabase};" +
+                "TrustServerCertificate=False;" +
+                "Encrypt=True;";
 
-            var connection = new SqlConnection(connectionString);
+                var connection = new SqlConnection(connectionString);
 
-            var tokenCredential = isLocal == "true" ? (TokenCredential)new AzureCliCredential() : new ManagedIdentityCredential();
+                var tokenCredential = isLocal == "true" ? (TokenCredential)new AzureCliCredential() : new ManagedIdentityCredential();
 
-            var tokenContext = new TokenRequestContext(new[] { "https://database.windows.net/.default" });
-            var accessToken = await tokenCredential.GetTokenAsync(tokenContext, CancellationToken.None);
+                var tokenContext = new TokenRequestContext(new[] { "https://database.windows.net/.default" });
+                var accessToken = await tokenCredential.GetTokenAsync(tokenContext, CancellationToken.None);
 
-            connection.AccessToken = accessToken.Token;
+                connection.AccessToken = accessToken.Token;
 
-            await connection.OpenAsync();
+                await connection.OpenAsync();
 
-            log.LogInformation("Connected to SQL Server: {server}, Database: {database}", warehouseServer, warehouseDatabase);
+                log.LogInformation("Connected to SQL Server: {server}, Database: {database}", warehouseServer, warehouseDatabase);
 
-            return connection;
+                return connection;
+            } 
+            catch (Exception ex)
+            {
+                log.LogError(ex.Message);
+                throw;
+            }
         }
     }
 }

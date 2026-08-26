@@ -14,13 +14,12 @@ namespace GCStats
             _logger = logger;
         }
 
-        //[Function("TotalUsers")]
-        //[QueueOutput("process-total-users", Connection = "AzureWebJobsStorage")]
-        //public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-
         [Function("TotalUsers")]
         [QueueOutput("process-total-users", Connection = "AzureWebJobsStorage")]
-        public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        //[Function("TotalUsers")]
+        //[QueueOutput("process-total-users", Connection = "AzureWebJobsStorage")]
+        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
             _logger.LogInformation("TotalUsers timer trigger executed at: {Time}", DateTime.UtcNow);
 
@@ -31,10 +30,7 @@ namespace GCStats
 
             var blobName = await Users.StreamUsersToBlobAsync(_logger, config);
 
-            //if (timer.ScheduleStatus is not null)
-            //{
-            //    _logger.LogInformation("Next scheduled run: {Next}", timer.ScheduleStatus.Next);
-            //}
+            _logger.LogInformation($"BlobName: {blobName}");
 
             return blobName;
         }
