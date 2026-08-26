@@ -27,11 +27,13 @@ namespace GCStats
 
     static class Communities
     {
+        public const string TotalCommunitiesContainerName = "communities";
+
         public static async Task<string> StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
         {
             try
             {
-                var graph = new Auth().GraphAuth(log);
+                var graph = Auth.GraphAuth(log);
 
                 // Get teams activity report
                 using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod("D7").GetAsync();
@@ -49,11 +51,10 @@ namespace GCStats
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
-                var containerName = "communities";
                 var blobName = $"communities-{DateTime.UtcNow:yyyy/MM/dd}.json";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                var containerClient = blobServiceClient.GetBlobContainerClient(TotalCommunitiesContainerName);
                 await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
                 var blobClient = containerClient.GetBlobClient(blobName);
 

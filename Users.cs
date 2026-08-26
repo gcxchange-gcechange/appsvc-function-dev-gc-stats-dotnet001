@@ -36,7 +36,7 @@ namespace GCStats
 
                 jsonWriter.WriteStartArray();
 
-                var graph = new Auth().GraphAuth(log);
+                var graph = Auth.GraphAuth(log);
                 int count = 0;
 
                 var usersPage = await graph.Users.GetAsync((requestConfiguration) =>

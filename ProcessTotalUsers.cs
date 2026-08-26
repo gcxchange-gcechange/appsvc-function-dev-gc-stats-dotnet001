@@ -40,6 +40,8 @@ namespace GCStats
 
                 if (users != null && users.Count > 0)
                 {
+                    _logger.LogInformation("Processing {count} users from blob: {blobName}", users.Count, blobName);
+
                     var dataTable = new DataTable();
 
                     dataTable.Columns.Add("Id", typeof(string));
@@ -54,30 +56,9 @@ namespace GCStats
                         dataTable.Rows.Add(user.Id, user.Mail, snapshotDate);
                     }
 
-                    var warehouseServer = Globals.GetAppSetting("fabricWarehouseServer", _logger, _config);
-                    var warehouseDatabase = Globals.GetAppSetting("fabricWarehouseDatabase", _logger, _config);
+                    using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
 
-                    // requires TCP 1433
-                    var connectionString =
-                    $"Server=tcp:{warehouseServer},1433;" +
-                    $"Initial Catalog={warehouseDatabase};" +
-                    "TrustServerCertificate=False;" +
-                    "Encrypt=True;";
-
-                    await using var connection = new SqlConnection(connectionString);
-
-                    var tokenCredential = isLocal == "true" ? (TokenCredential)new AzureCliCredential() : new ManagedIdentityCredential();
-
-                    var tokenContext = new TokenRequestContext(new[] { "https://database.windows.net/.default" });
-                    var accessToken = await tokenCredential.GetTokenAsync(tokenContext, CancellationToken.None);
-
-                    connection.AccessToken = accessToken.Token;
-
-                    await connection.OpenAsync();
-
-                    _logger.LogInformation("Connected to SQL Server: {server}, Database: {database}", warehouseServer, warehouseDatabase);
-
-                    using var bulkCopy = new SqlBulkCopy(connection);
+                    using var bulkCopy = new SqlBulkCopy(sqlConnection);
                     bulkCopy.DestinationTableName = "dbo.TotalUsers";
                     bulkCopy.BatchSize = 50000;
                     bulkCopy.BulkCopyTimeout = 0;
