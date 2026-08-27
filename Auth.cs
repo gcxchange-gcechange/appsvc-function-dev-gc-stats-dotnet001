@@ -21,6 +21,7 @@ namespace GCStats
             var secretName = Globals.GetAppSetting("secretName", log, config);
             var tenantId = Globals.GetAppSetting("tenantId", log, config);
             var clientId = Globals.GetAppSetting("clientId", log, config);
+            var workspaceId = Globals.GetAppSetting("workspaceId", log, config);
 
             SecretClientOptions options = new SecretClientOptions()
             {
