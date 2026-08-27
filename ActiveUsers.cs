@@ -81,7 +81,7 @@ namespace GCStats
 
                 //blob container name and blob name for storing the active users list
                 var containerName = "activeusers";
-                var blobName = $"{containerName}-{DateTime.UtcNow:yyyy/MM/dd}.json";
+                string blobName = $"{containerName}-{DateTime.UtcNow:dd-MM-yyyy}.json";
                 var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
                 await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
                 var blobClient = containerClient.GetBlobClient(blobName);
