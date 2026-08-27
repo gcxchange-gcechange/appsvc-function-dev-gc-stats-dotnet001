@@ -15,18 +15,19 @@ namespace GCStats
     {
         public static readonly string[] UserQuerySelectParams = ["id", "mail"];
 
-        public static async Task StreamUsersToBlobAsync(ILogger log, IConfiguration config)
+        public const string TotalUsersContainerName = "users";
+
+        public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
             try
             {
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionUsersArray = Globals.GetAppSetting("exceptionUsersArray", log, config);
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
-                var containerName = "users";
-                var blobName = $"users-{DateTime.UtcNow:yyyy/MM/dd}.json";
+                var blobName = $"users-{DateTime.UtcNow:yyyy-MM-dd}.json";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                var containerClient = blobServiceClient.GetBlobContainerClient(TotalUsersContainerName);
                 await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
                 var blobClient = containerClient.GetBlobClient(blobName);
 
@@ -35,7 +36,7 @@ namespace GCStats
 
                 jsonWriter.WriteStartArray();
 
-                var graph = new Auth().GraphAuth(log);
+                var graph = Auth.GraphAuth(log);
                 int count = 0;
 
                 var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
@@ -73,12 +74,16 @@ namespace GCStats
                 await blobStream.FlushAsync();
 
                 log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
+
+                return blobName;
             }
             catch (Exception ex)
             {
                 log.LogError("StreamUsersToBlobAsync failed");
                 log.LogError(ex.Message);
             }
+
+            return string.Empty;
         }
     }
 }

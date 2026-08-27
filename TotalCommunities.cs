@@ -1,4 +1,5 @@
-﻿using Microsoft.Azure.Functions.Worker;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -14,7 +15,11 @@ namespace GCStats
         }
 
         [Function("TotalCommunities")]
-        public async Task Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        [QueueOutput("process-total-communities", Connection = "AzureWebJobsStorage")]
+        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        //[Function("TotalCommunities")]
+        //[QueueOutput("process-total-communities", Connection = "AzureWebJobsStorage")]
+        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
             _logger.LogInformation("TotalCommunities timer trigger executed at: {Time}", DateTime.UtcNow);
 
@@ -23,12 +28,11 @@ namespace GCStats
                .AddEnvironmentVariables()
                .Build();
 
-            await Communities.StreamCommunitiesToBlobAsync(_logger, config);
+            var blobName = await Communities.StreamCommunitiesToBlobAsync(_logger, config);
 
-            if (timer.ScheduleStatus is not null)
-            {
-                _logger.LogInformation("Next scheduled run: {Next}", timer.ScheduleStatus.Next);
-            }
+            _logger.LogInformation($"BlobName: {blobName}");
+
+            return blobName;
         }
     }
 }

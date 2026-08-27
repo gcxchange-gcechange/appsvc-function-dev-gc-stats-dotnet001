@@ -1,15 +1,16 @@
 ﻿using Azure.Core;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 
 namespace GCStats
 {
-    class Auth
+    static class Auth
     {
-        public GraphServiceClient GraphAuth(ILogger log)
+        public static GraphServiceClient GraphAuth(ILogger log)
         {
             IConfiguration config = new ConfigurationBuilder()
            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -58,6 +59,43 @@ namespace GCStats
 
             var graphClient = new GraphServiceClient(clientSecretCredential, scopes);
             return graphClient;
+        }
+
+        public static async Task<SqlConnection> GetSqlConnection(ILogger log, IConfiguration config)
+        {
+            try
+            {
+                var warehouseServer = Globals.GetAppSetting("fabricWarehouseServer", log, config);
+                var warehouseDatabase = Globals.GetAppSetting("fabricWarehouseDatabase", log, config);
+                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+
+                // requires TCP 1433
+                var connectionString =
+                $"Server=tcp:{warehouseServer},1433;" +
+                $"Initial Catalog={warehouseDatabase};" +
+                "TrustServerCertificate=False;" +
+                "Encrypt=True;";
+
+                var connection = new SqlConnection(connectionString);
+
+                var tokenCredential = isLocal == "true" ? (TokenCredential)new AzureCliCredential() : new ManagedIdentityCredential();
+
+                var tokenContext = new TokenRequestContext(new[] { "https://database.windows.net/.default" });
+                var accessToken = await tokenCredential.GetTokenAsync(tokenContext, CancellationToken.None);
+
+                connection.AccessToken = accessToken.Token;
+
+                await connection.OpenAsync();
+
+                log.LogInformation("Connected to SQL Server: {server}, Database: {database}", warehouseServer, warehouseDatabase);
+
+                return connection;
+            } 
+            catch (Exception ex)
+            {
+                log.LogError(ex.Message);
+                throw;
+            }
         }
     }
 }

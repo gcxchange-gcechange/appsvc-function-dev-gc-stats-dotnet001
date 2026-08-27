@@ -17,7 +17,6 @@ namespace GCStats
         string DisplayName, 
         UserRecord[] OwnerList,
         UserRecord[] MemberList,
-        List<string> GroupTypes,
         SensitivityLabelRecord SensitivityLabel,
         DateTimeOffset CreationDate,
         DateTimeOffset LastActivityDate
@@ -27,11 +26,13 @@ namespace GCStats
 
     static class Communities
     {
-        public static async Task StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
+        public const string TotalCommunitiesContainerName = "communities";
+
+        public static async Task<string> StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
         {
             try
             {
-                var graph = new Auth().GraphAuth(log);
+                var graph = Auth.GraphAuth(log);
 
                 // Get teams activity report
                 using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod("D7").GetAsync();
@@ -49,11 +50,10 @@ namespace GCStats
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
-                var containerName = "communities";
-                var blobName = $"communities-{DateTime.UtcNow:yyyy/MM/dd}.json";
+                var blobName = $"communities-{DateTime.UtcNow:yyyy-MM-dd}.json";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                var containerClient = blobServiceClient.GetBlobContainerClient(TotalCommunitiesContainerName);
                 await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
                 var blobClient = containerClient.GetBlobClient(blobName);
 
@@ -68,7 +68,7 @@ namespace GCStats
                 {
                     requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
                     requestConfiguration.QueryParameters.Top = 999;
-                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "groupTypes", "assignedLabels", "resourceProvisioningOptions"];
+                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "assignedLabels", "resourceProvisioningOptions"];
                     requestConfiguration.QueryParameters.Filter = "resourceProvisioningOptions/Any(x:x eq 'Team')";
                 });
 
@@ -109,7 +109,6 @@ namespace GCStats
                                     DisplayName: group.DisplayName ?? string.Empty,
                                     OwnerList: owners,
                                     MemberList: members,
-                                    GroupTypes: group.GroupTypes ?? new List<string>(),
                                     SensitivityLabel: new SensitivityLabelRecord(
                                         Id: group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty,
                                         DisplayName: group.AssignedLabels?.FirstOrDefault()?.DisplayName ?? string.Empty
@@ -138,12 +137,16 @@ namespace GCStats
                 await blobStream.FlushAsync();
 
                 log.LogInformation("Streamed {Count} communities to blob {BlobName}", count, blobName);
+
+                return blobName;
             }
             catch (Exception ex) 
             {
                 log.LogError("StreamCommunitiesToBlobAsync failed.");
                 log.LogError(ex.Message.ToString());
             }
+
+            return string.Empty;
         }
 
         private static async Task<(UserRecord[] Owners, UserRecord[] Members)> GetOwnersAndMembersAsync(GraphServiceClient graph, string groupId, ILogger log)
