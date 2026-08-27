@@ -17,7 +17,6 @@ namespace GCStats
         string DisplayName, 
         UserRecord[] OwnerList,
         UserRecord[] MemberList,
-        List<string> GroupTypes,
         SensitivityLabelRecord SensitivityLabel,
         DateTimeOffset CreationDate,
         DateTimeOffset LastActivityDate
@@ -51,7 +50,7 @@ namespace GCStats
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
-                var blobName = $"communities-{DateTime.UtcNow:yyyy/MM/dd}.json";
+                var blobName = $"communities-{DateTime.UtcNow:yyyy-MM-dd}.json";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
                 var containerClient = blobServiceClient.GetBlobContainerClient(TotalCommunitiesContainerName);
@@ -69,7 +68,7 @@ namespace GCStats
                 {
                     requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
                     requestConfiguration.QueryParameters.Top = 999;
-                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "groupTypes", "assignedLabels", "resourceProvisioningOptions"];
+                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "assignedLabels", "resourceProvisioningOptions"];
                     requestConfiguration.QueryParameters.Filter = "resourceProvisioningOptions/Any(x:x eq 'Team')";
                 });
 
@@ -110,7 +109,6 @@ namespace GCStats
                                     DisplayName: group.DisplayName ?? string.Empty,
                                     OwnerList: owners,
                                     MemberList: members,
-                                    GroupTypes: group.GroupTypes ?? new List<string>(),
                                     SensitivityLabel: new SensitivityLabelRecord(
                                         Id: group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty,
                                         DisplayName: group.AssignedLabels?.FirstOrDefault()?.DisplayName ?? string.Empty
