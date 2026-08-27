@@ -78,39 +78,65 @@ namespace GCStats
                     }
 
                     using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+                    using var transaction = sqlConnection.BeginTransaction();
 
-                    using var bulkCopy = new SqlBulkCopy(sqlConnection);
-                    bulkCopy.DestinationTableName = "dbo.TotalCommunities";
-                    bulkCopy.BatchSize = 50000;
-                    bulkCopy.BulkCopyTimeout = 0;
+                    try
+                    {
+                        var bulkCopyOptions = SqlBulkCopyOptions.TableLock;
 
-                    bulkCopy.ColumnMappings.Add("Id", "Id");
-                    bulkCopy.ColumnMappings.Add("DisplayName", "DisplayName");
-                    bulkCopy.ColumnMappings.Add("SensitivityLabelId", "SensitivityLabelId");
-                    bulkCopy.ColumnMappings.Add("CreationDate", "CreationDate");
-                    bulkCopy.ColumnMappings.Add("LastActivityDate", "LastActivityDate");
-                    bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
+                        using (var bulkCopy = new SqlBulkCopy(sqlConnection, bulkCopyOptions, transaction))
+                        {
+                            bulkCopy.DestinationTableName = "dbo.TotalCommunities";
+                            bulkCopy.BatchSize = 50000;
+                            bulkCopy.BulkCopyTimeout = 0;
 
-                    await bulkCopy.WriteToServerAsync(communityDataTable);
+                            bulkCopy.ColumnMappings.Add("Id", "Id");
+                            bulkCopy.ColumnMappings.Add("DisplayName", "DisplayName");
+                            bulkCopy.ColumnMappings.Add("SensitivityLabelId", "SensitivityLabelId");
+                            bulkCopy.ColumnMappings.Add("CreationDate", "CreationDate");
+                            bulkCopy.ColumnMappings.Add("LastActivityDate", "LastActivityDate");
+                            bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
 
-                    _logger.LogInformation("Successfully uploaded {count} communities to dbo.TotalCommunities", communities.Count);
+                            await bulkCopy.WriteToServerAsync(communityDataTable);
+                            _logger.LogInformation("Successfully uploaded {count} communities to dbo.TotalCommunities", communities.Count);
+                        }
 
-                    bulkCopy.ColumnMappings.Clear();
-                    bulkCopy.DestinationTableName = "dbo.CommunityOwners";
+                        using (var bulkCopy = new SqlBulkCopy(sqlConnection, bulkCopyOptions, transaction))
+                        {
+                            bulkCopy.DestinationTableName = "dbo.CommunityOwners";
+                            bulkCopy.BatchSize = 50000;
+                            bulkCopy.BulkCopyTimeout = 0;
 
-                    bulkCopy.ColumnMappings.Add("Id", "UserId");
-                    bulkCopy.ColumnMappings.Add("CommunityId", "CommunityId");
-                    bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
+                            bulkCopy.ColumnMappings.Add("Id", "UserId");
+                            bulkCopy.ColumnMappings.Add("CommunityId", "CommunityId");
+                            bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
 
-                    await bulkCopy.WriteToServerAsync(ownerDataTable);
+                            await bulkCopy.WriteToServerAsync(ownerDataTable);
+                            _logger.LogInformation("Successfully uploaded {count} owners to dbo.CommunityOwners", ownerDataTable.Rows.Count);
+                        }
 
-                    _logger.LogInformation("Successfully uploaded {count} owners to dbo.CommunityOwners", ownerDataTable.Rows.Count);
+                        using (var bulkCopy = new SqlBulkCopy(sqlConnection, bulkCopyOptions, transaction))
+                        {
+                            bulkCopy.DestinationTableName = "dbo.CommunityMembers";
+                            bulkCopy.BatchSize = 50000;
+                            bulkCopy.BulkCopyTimeout = 0;
 
-                    bulkCopy.DestinationTableName = "dbo.CommunityMembers";
+                            bulkCopy.ColumnMappings.Add("Id", "UserId");
+                            bulkCopy.ColumnMappings.Add("CommunityId", "CommunityId");
+                            bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
 
-                    await bulkCopy.WriteToServerAsync(memberDataTable);
+                            await bulkCopy.WriteToServerAsync(memberDataTable);
+                            _logger.LogInformation("Successfully uploaded {count} members to dbo.CommunityMembers", memberDataTable.Rows.Count);
+                        }
 
-                    _logger.LogInformation("Successfully uploaded {count} members to dbo.CommunityMembers", memberDataTable.Rows.Count);
+                        transaction.Commit();
+                    }
+                    catch
+                    {
+                        // If anything fails we rollback the entire transaction
+                        transaction.Rollback();
+                        throw;
+                    }
                 }
                 else
                 {
