@@ -16,6 +16,7 @@ namespace GCStats
         public static readonly string[] UserQuerySelectParams = ["id", "mail"];
 
         public const string TotalUsersContainerName = "users";
+        public const string ActiveUsersContainerName = "active-users";
 
         public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {

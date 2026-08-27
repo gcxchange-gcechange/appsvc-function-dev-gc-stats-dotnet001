@@ -27,5 +27,18 @@ namespace GCStats
 
             return value ?? string.Empty;
         }
+
+        public static DateTime GetDateFromBlob(string blobName, ILogger log)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(blobName, @"(\d{2}-\d{2}-\d{4})\.json$");
+            if (!match.Success)
+            {
+                throw new FormatException($"Could not extract date from blob name: {blobName}");
+            }
+
+            var snapshotDate = DateTime.ParseExact(match.Groups[1].Value, "dd-MM-yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+            return snapshotDate;
+        }
     }
 }

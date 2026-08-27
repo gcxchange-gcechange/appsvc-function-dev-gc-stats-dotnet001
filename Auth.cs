@@ -1,5 +1,6 @@
 ﻿using Azure.Core;
 using Azure.Identity;
+using Azure.Monitor.Query.Logs;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -61,6 +62,37 @@ namespace GCStats
             return graphClient;
         }
 
+        public static async Task<LogsQueryClient> LogsAuth(ILogger log)
+        {
+            try
+            {
+                IConfiguration config = new ConfigurationBuilder()
+               .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+               .AddEnvironmentVariables()
+               .Build();
+
+                var tenantId = Globals.GetAppSetting("tenantId", log, config);
+                var clientId = Globals.GetAppSetting("clientId", log, config);
+                var secretName = Globals.GetAppSetting("secretName", log, config);
+                var keyVaultUrl = Globals.GetAppSetting("keyVaultUrl", log, config);
+                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+
+                var secretClient = new SecretClient(new Uri(keyVaultUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
+
+                KeyVaultSecret secret = secretClient.GetSecret(secretName);
+
+                var credential = new ClientSecretCredential(tenantId, clientId, secret.Value);
+                var logsQueryClient = new LogsQueryClient(credential);
+
+                return logsQueryClient;
+            }
+            catch (Exception ex)
+            {
+                log.LogError(ex.ToString());
+                throw;
+            }
+        }
+
         public static async Task<SqlConnection> GetSqlConnection(ILogger log, IConfiguration config)
         {
             try
@@ -93,7 +125,7 @@ namespace GCStats
             } 
             catch (Exception ex)
             {
-                log.LogError(ex.Message);
+                log.LogError(ex.ToString());
                 throw;
             }
         }

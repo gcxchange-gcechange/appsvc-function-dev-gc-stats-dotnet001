@@ -1,5 +1,4 @@
-﻿using Azure.Core;
-using Azure.Identity;
+﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
@@ -10,19 +9,19 @@ using System.Text.Json;
 
 namespace GCStats
 {
-    public class ProcessTotalUsers
+    public class ProcessActiveUsers
     {
-        private readonly ILogger<ProcessTotalUsers> _logger;
+        private readonly ILogger<ProcessActiveUsers> _logger;
         private readonly IConfiguration _config;
 
-        public ProcessTotalUsers(ILogger<ProcessTotalUsers> logger, IConfiguration config)
+        public ProcessActiveUsers(ILogger<ProcessActiveUsers> logger, IConfiguration config)
         {
             _logger = logger;
             _config = config;
         }
 
-        [Function("ProcessTotalUsers")]
-        public async Task Run([QueueTrigger("process-total-users", Connection = "AzureWebJobsStorage")] string blobName)
+        [Function("ProcessActiveUsers")]
+        public async Task Run([QueueTrigger("process-active-users", Connection = "AzureWebJobsStorage")] string blobName)
         {
             _logger.LogInformation("Received blobName: {blobName}", blobName);
 
@@ -32,7 +31,7 @@ namespace GCStats
                 var isLocal = Globals.GetAppSetting("isLocal", _logger, _config, false);
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-                var containerClient = blobServiceClient.GetBlobContainerClient(Users.TotalUsersContainerName);
+                var containerClient = blobServiceClient.GetBlobContainerClient(Users.ActiveUsersContainerName);
                 var blobClient = containerClient.GetBlobClient(blobName);
 
                 var response = await blobClient.DownloadContentAsync();
@@ -58,7 +57,7 @@ namespace GCStats
                     using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
 
                     using var bulkCopy = new SqlBulkCopy(sqlConnection);
-                    bulkCopy.DestinationTableName = "dbo.TotalUsers";
+                    bulkCopy.DestinationTableName = "dbo.ActiveUsers";
                     bulkCopy.BatchSize = 50000;
                     bulkCopy.BulkCopyTimeout = 0;
 
@@ -68,14 +67,14 @@ namespace GCStats
 
                     await bulkCopy.WriteToServerAsync(dataTable);
 
-                    _logger.LogInformation("Successfully uploaded {count} users to dbo.TotalUsers", users.Count);
+                    _logger.LogInformation("Successfully uploaded {count} users to dbo.ActiveUsers", users.Count);
                 }
                 else
                 {
                     throw new DataException("No users to upload");
                 }
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 _logger.LogError(ex.Message);
                 throw;

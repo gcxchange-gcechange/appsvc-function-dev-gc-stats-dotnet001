@@ -59,8 +59,7 @@ namespace GCStats
                     memberDataTable.Columns.Add("CommunityId", typeof(string));
                     memberDataTable.Columns.Add("SnapshotDate", typeof(DateTime));
 
-                    var splitBlobName = blobName.Split('.').First().Split('-').Skip(1);
-                    var snapshotDate = DateTime.Parse(String.Join("-", splitBlobName));
+                    var snapshotDate = Globals.GetDateFromBlob(blobName, _logger);
 
                     foreach (var community in communities)
                     {
