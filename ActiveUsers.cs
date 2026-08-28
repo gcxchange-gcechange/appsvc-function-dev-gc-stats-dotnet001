@@ -52,7 +52,7 @@ namespace GCStats
 
             try
             {
-                string blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow:dd-MM-yyyy}.json";
+                string blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.json";
                 var containerClient = blobServiceClient.GetBlobContainerClient(Users.ActiveUsersContainerName);
                 await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
                 var blobClient = containerClient.GetBlobClient(blobName);

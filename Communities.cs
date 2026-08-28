@@ -50,7 +50,7 @@ namespace GCStats
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
-                var blobName = $"communities-{DateTime.UtcNow:yyyy-MM-dd}.json";
+                var blobName = $"communities-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.json";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
                 var containerClient = blobServiceClient.GetBlobContainerClient(TotalCommunitiesContainerName);
