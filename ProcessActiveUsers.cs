@@ -35,7 +35,7 @@ namespace GCStats
                 var blobClient = containerClient.GetBlobClient(blobName);
 
                 var response = await blobClient.DownloadContentAsync();
-                var users = JsonSerializer.Deserialize<List<UserRecord>>(response.Value.Content.ToString(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var users = JsonSerializer.Deserialize<List<ActiveUserRecord>>(response.Value.Content.ToString(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
                 if (users != null && users.Count > 0)
                 {
@@ -44,14 +44,14 @@ namespace GCStats
                     var dataTable = new DataTable();
 
                     dataTable.Columns.Add("Id", typeof(string));
-                    dataTable.Columns.Add("Mail", typeof(string));
+                    dataTable.Columns.Add("ActivityDateTime", typeof(string));
                     dataTable.Columns.Add("SnapshotDate", typeof(DateTime));
 
                     var snapshotDate = Globals.GetDateFromBlob(blobName, _logger);
 
                     foreach (var user in users)
                     {
-                        dataTable.Rows.Add(user.Id, user.Mail, snapshotDate);
+                        dataTable.Rows.Add(user.Id, user.ActivityDateTime, snapshotDate);
                     }
 
                     using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
@@ -62,7 +62,7 @@ namespace GCStats
                     bulkCopy.BulkCopyTimeout = 0;
 
                     bulkCopy.ColumnMappings.Add("Id", "Id");
-                    bulkCopy.ColumnMappings.Add("Mail", "Mail");
+                    bulkCopy.ColumnMappings.Add("ActivityDateTime", "ActivityDateTime");
                     bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
 
                     await bulkCopy.WriteToServerAsync(dataTable);
@@ -71,7 +71,7 @@ namespace GCStats
                 }
                 else
                 {
-                    throw new DataException("No users to upload");
+                    _logger.LogWarning("No active users to upload.");
                 }
             }
             catch (Exception ex)

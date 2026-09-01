@@ -8,10 +8,12 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
-
+using Microsoft.AspNetCore.Http;
 
 namespace GCStats
 {
+    public record ActiveUserRecord(string Id, DateTime ActivityDateTime);
+
     public class ActiveUsers
     {
         private readonly ILogger<ActiveUsers> _logger;
@@ -24,12 +26,12 @@ namespace GCStats
         }
 
         
-        [Function("ActiveUsers")]
-        [QueueOutput("process-active-users", Connection = "AzureWebJobsStorage")]
-        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
         //[Function("ActiveUsers")]
         //[QueueOutput("process-active-users", Connection = "AzureWebJobsStorage")]
-        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        //public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        [Function("ActiveUsers")]
+        [QueueOutput("process-active-users", Connection = "AzureWebJobsStorage")]
+        public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
             _logger.LogInformation($"Timer trigger function executed at: {DateTime.UtcNow}");
 
@@ -74,24 +76,23 @@ namespace GCStats
                     timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24))
                 );
 
-                LogsTable table = response.Value.Table;
-
-                var users = new List<UserRecord>();
-                foreach (var row in table.Rows)
+                var activeUsers = new List<ActiveUserRecord>();
+                foreach (var row in response.Value.Table.Rows)
                 {
                     var userId = row["UserId"]?.ToString() ?? "";
-                    var email = row["UserPrincipalName"]?.ToString() ?? ""; // TODO: UPN is not mail, get the mail of the user instead 
-                    users.Add(new UserRecord(userId, email));
+                    var activityDateTime = row["LastCall"] is DateTime dateTime ? dateTime : DateTime.UtcNow.AddDays(-1);
+
+                    activeUsers.Add(new ActiveUserRecord(userId, activityDateTime));
                 }
 
-                log.LogInformation(users.Count + " active users retrieved.");
+                log.LogInformation(activeUsers.Count + " active users retrieved.");
 
                 using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
 
-                await JsonSerializer.SerializeAsync(blobStream, users, Globals.JsonOptions);
+                await JsonSerializer.SerializeAsync(blobStream, activeUsers, Globals.JsonOptions);
                 await blobStream.FlushAsync();
 
-                log.LogInformation($"Saved {users.Count} active users to blob: {blobName}");
+                log.LogInformation($"Saved {activeUsers.Count} active users to blob: {blobName}");
 
                 return blobName;
             }
