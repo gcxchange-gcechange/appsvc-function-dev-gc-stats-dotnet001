@@ -6,6 +6,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using System.Text.Json;
+using Parquet;
+using Parquet.Schema;
 
 namespace GCStats
 {
@@ -17,6 +19,8 @@ namespace GCStats
 
         public const string TotalUsersContainerName = "users";
         public const string ActiveUsersContainerName = "active-users";
+
+        private const int RowGroupBatchSize = 50_000;
 
         public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
@@ -73,6 +77,101 @@ namespace GCStats
                 jsonWriter.WriteEndArray();
                 await jsonWriter.FlushAsync();
                 await blobStream.FlushAsync();
+
+                log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
+
+                return blobName;
+            }
+            catch (Exception ex)
+            {
+                log.LogError("StreamUsersToBlobAsync failed");
+                log.LogError(ex.Message);
+            }
+
+            return string.Empty;
+        }
+
+        public static async Task<string> StreamParquetUsersToBlobAsync(ILogger log, IConfiguration config)
+        {
+            try
+            {
+                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
+                var exceptionUsersArray = Globals.GetAppSetting("exceptionUsersArray", log, config);
+                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+                var blobName = $"users-{DateTime.UtcNow:yyyy-MM-dd}.parquet";
+
+                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
+                var containerClient = blobServiceClient.GetBlobContainerClient(TotalUsersContainerName);
+                await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
+                var blobClient = containerClient.GetBlobClient(blobName);
+
+                var idField = new DataField<string>("Id");
+                var mailField = new DataField<string>("Mail");
+                var schema = new ParquetSchema(idField, mailField);
+
+                var parquetOptions = new ParquetOptions
+                {
+                    CompressionMethod = CompressionMethod.Snappy
+                };
+
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+
+                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, parquetOptions);
+
+                var graph = Auth.GraphAuth(log);
+                int count = 0;
+
+                var idBuffer = new List<string>(RowGroupBatchSize);
+                var mailBuffer = new List<string>(RowGroupBatchSize);
+
+                async Task FlushBatchAsync()
+                {
+                    if (idBuffer.Count == 0) return;
+
+                    using var groupWriter = parquetWriter.CreateRowGroup();
+                    await groupWriter.WriteAsync(idField, idBuffer);
+                    await groupWriter.WriteAsync(mailField, mailBuffer);
+
+                    idBuffer.Clear();
+                    mailBuffer.Clear();
+                }
+
+                var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
+                {
+                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                    requestConfiguration.QueryParameters.Top = 999;
+                    requestConfiguration.QueryParameters.Select = Users.UserQuerySelectParams;
+                });
+
+                var pageIterator = PageIterator<User, UserCollectionResponse>
+                    .CreatePageIterator(
+                        graph,
+                        usersPage!,
+                        user =>
+                        {
+                            if (user.Id != null && !exceptionUsersArray.Contains(user.Id))
+                            {
+                                idBuffer.Add(user.Id);
+                                mailBuffer.Add(user.Mail ?? string.Empty);
+                                count++;
+
+                                if (idBuffer.Count >= RowGroupBatchSize)
+                                {
+                                    FlushBatchAsync().GetAwaiter().GetResult();
+                                }
+                            }
+
+                            return true;
+                        },
+                        requestConfiguration =>
+                        {
+                            requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                            return requestConfiguration;
+                        });
+
+                await pageIterator.IterateAsync();
+
+                await FlushBatchAsync();
 
                 log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
 
