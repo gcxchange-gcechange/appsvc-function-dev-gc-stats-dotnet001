@@ -1,6 +1,7 @@
 ﻿using Azure.Core;
 using Azure.Identity;
 using Azure.Storage.Blobs;
+using Azure.Storage.Sas;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -30,52 +31,107 @@ namespace GCStats
             {
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", _logger, _config);
                 var isLocal = Globals.GetAppSetting("isLocal", _logger, _config, false);
+                var credential = isLocal == "true" ? new AzureCliCredential() : (Azure.Core.TokenCredential)new DefaultAzureCredential();
 
-                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
+                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), credential);
                 var containerClient = blobServiceClient.GetBlobContainerClient(Users.TotalUsersContainerName);
                 var blobClient = containerClient.GetBlobClient(blobName);
 
-                var response = await blobClient.DownloadContentAsync();
-                var users = JsonSerializer.Deserialize<List<UserRecord>>(response.Value.Content.ToString(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (!await blobClient.ExistsAsync())
+                    throw new FileNotFoundException($"Blob {blobName} not found in container {Users.TotalUsersContainerName}");
 
-                if (users != null && users.Count > 0)
-                {
-                    _logger.LogInformation("Processing {count} users from blob: {blobName}", users.Count, blobName);
+                var snapshotDate = Globals.GetDateFromBlob(blobName, _logger);
 
-                    var dataTable = new DataTable();
-
-                    dataTable.Columns.Add("Id", typeof(string));
-                    dataTable.Columns.Add("Mail", typeof(string));
-                    dataTable.Columns.Add("SnapshotDate", typeof(DateTime));
-
-                    var snapshotDate = Globals.GetDateFromBlob(blobName, _logger);
-
-                    foreach (var user in users)
+                var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
+                    new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(DateTimeOffset.UtcNow.AddMinutes(15))
                     {
-                        dataTable.Rows.Add(user.Id, user.Mail, snapshotDate);
+                        StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5)
+                    }
+                 );
+
+                var sasBuilder = new BlobSasBuilder
+                {
+                    BlobContainerName = containerClient.Name,
+                    BlobName = blobClient.Name,
+                    Resource = "b",
+                    StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
+                    ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15)
+                };
+                sasBuilder.SetPermissions(BlobSasPermissions.Read);
+
+                var sasToken = sasBuilder.ToSasQueryParameters(delegationKey.Value, blobServiceClient.AccountName).ToString();
+
+                var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
+                var sasSecret = sasToken.Replace("'", "''");
+
+                using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+                using var transaction = sqlConnection.BeginTransaction();
+
+                try
+                {
+                    using (var createCmd = new SqlCommand(
+                        """
+                        CREATE TABLE #StagingUsers (
+                            Id VARCHAR(36),
+                            Mail VARCHAR(320)
+                        ) WITH (DISTRIBUTION = ROUND_ROBIN);
+                        """,
+                        sqlConnection, transaction))
+                    {
+                        await createCmd.ExecuteNonQueryAsync();
                     }
 
-                    using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+                    using (var copyCmd = new SqlCommand(
+                        $"""
+                         COPY INTO #StagingUsers
+                         FROM '{blobUrl}'
+                         WITH (
+                             FILE_TYPE = 'PARQUET',
+                             CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
+                         );
+                         """,
+                        sqlConnection, transaction))
+                    {
+                        copyCmd.CommandTimeout = 0;
+                        await copyCmd.ExecuteNonQueryAsync();
+                    }
 
-                    using var bulkCopy = new SqlBulkCopy(sqlConnection);
-                    bulkCopy.DestinationTableName = "dbo.TotalUsers";
-                    bulkCopy.BatchSize = 50000;
-                    bulkCopy.BulkCopyTimeout = 0;
+                    int stagedCount;
+                    using (var countCmd = new SqlCommand("SELECT COUNT(*) FROM #StagingUsers;", sqlConnection, transaction))
+                    {
+                        stagedCount = (int)await countCmd.ExecuteScalarAsync();
+                    }
 
-                    bulkCopy.ColumnMappings.Add("Id", "Id");
-                    bulkCopy.ColumnMappings.Add("Mail", "Mail");
-                    bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
+                    if (stagedCount == 0)
+                    {
+                        throw new DataException("No users to upload");
+                    }
 
-                    await bulkCopy.WriteToServerAsync(dataTable);
+                    _logger.LogInformation("Copied {count} users from blob {blobName} into staging", stagedCount, blobName);
 
-                    _logger.LogInformation("Successfully uploaded {count} users to dbo.TotalUsers", users.Count);
+                    using (var insertCmd = new SqlCommand(
+                        """
+                        INSERT INTO dbo.TotalUsers (Id, Mail, SnapshotDate)
+                        SELECT Id, Mail, @SnapshotDate
+                        FROM #StagingUsers;
+                        """,
+                        sqlConnection, transaction))
+                    {
+                        insertCmd.Parameters.AddWithValue("@SnapshotDate", snapshotDate);
+                        await insertCmd.ExecuteNonQueryAsync();
+                    }
+
+                    transaction.Commit();
+
+                    _logger.LogInformation("Successfully uploaded {count} users to dbo.TotalUsers", stagedCount);
                 }
-                else
+                catch
                 {
-                    throw new DataException("No users to upload");
+                    transaction.Rollback();
+                    throw;
                 }
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 _logger.LogError(ex.Message);
                 throw;
