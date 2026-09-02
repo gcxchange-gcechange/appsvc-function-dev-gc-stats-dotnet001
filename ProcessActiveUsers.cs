@@ -44,14 +44,14 @@ namespace GCStats
                     var dataTable = new DataTable();
 
                     dataTable.Columns.Add("Id", typeof(string));
-                    dataTable.Columns.Add("ActivityDateTime", typeof(string));
+                    dataTable.Columns.Add("LastActivity", typeof(string));
                     dataTable.Columns.Add("SnapshotDate", typeof(DateTime));
 
                     var snapshotDate = Globals.GetDateFromBlob(blobName, _logger);
 
                     foreach (var user in users)
                     {
-                        dataTable.Rows.Add(user.Id, user.ActivityDateTime, snapshotDate);
+                        dataTable.Rows.Add(user.Id, user.LastActivity, snapshotDate);
                     }
 
                     using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
@@ -62,7 +62,7 @@ namespace GCStats
                     bulkCopy.BulkCopyTimeout = 0;
 
                     bulkCopy.ColumnMappings.Add("Id", "Id");
-                    bulkCopy.ColumnMappings.Add("ActivityDateTime", "ActivityDateTime");
+                    bulkCopy.ColumnMappings.Add("LastActivity", "LastActivity");
                     bulkCopy.ColumnMappings.Add("SnapshotDate", "SnapshotDate");
 
                     await bulkCopy.WriteToServerAsync(dataTable);

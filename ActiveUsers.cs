@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace GCStats
 {
-    public record ActiveUserRecord(string Id, DateTime ActivityDateTime);
+    public record ActiveUserRecord(string Id, DateTime LastActivity);
 
     public class ActiveUsers
     {
@@ -87,9 +87,23 @@ namespace GCStats
 
                 log.LogInformation(activeUsers.Count + " active users retrieved.");
 
+                var defaultActivityDate = DateTime.UtcNow.AddDays(-1);
                 using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+                using var jsonWriter = new Utf8JsonWriter(blobStream);
 
-                await JsonSerializer.SerializeAsync(blobStream, activeUsers, Globals.JsonOptions);
+                jsonWriter.WriteStartArray();
+
+                foreach (var row in response.Value.Table.Rows)
+                {
+                    var userId = row["UserId"] as string ?? "";
+                    var activityDateTime = row["LastCall"] is DateTime dateTime ? dateTime : defaultActivityDate;
+
+                    JsonSerializer.Serialize(jsonWriter, new ActiveUserRecord(userId, activityDateTime), Globals.JsonOptions);
+                }
+
+                jsonWriter.WriteEndArray();
+
+                await jsonWriter.FlushAsync();
                 await blobStream.FlushAsync();
 
                 log.LogInformation($"Saved {activeUsers.Count} active users to blob: {blobName}");
