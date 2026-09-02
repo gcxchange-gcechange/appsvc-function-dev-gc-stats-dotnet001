@@ -1,13 +1,10 @@
-﻿using Azure.Core;
-using Azure.Identity;
+﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Sas;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Data;
-using System.Text.Json;
 
 namespace GCStats
 {
@@ -40,8 +37,6 @@ namespace GCStats
                 if (!await blobClient.ExistsAsync())
                     throw new FileNotFoundException($"Blob {blobName} not found in container {Users.TotalUsersContainerName}");
 
-                var snapshotDate = Globals.GetDateFromBlob(blobName, _logger);
-
                 var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
                     new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(DateTimeOffset.UtcNow.AddMinutes(15))
                     {
@@ -65,71 +60,23 @@ namespace GCStats
                 var sasSecret = sasToken.Replace("'", "''");
 
                 using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
-                using var transaction = sqlConnection.BeginTransaction();
 
-                try
-                {
-                    using (var createCmd = new SqlCommand(
-                        """
-                        CREATE TABLE #StagingUsers (
-                            Id VARCHAR(36),
-                            Mail VARCHAR(320)
-                        ) WITH (DISTRIBUTION = ROUND_ROBIN);
-                        """,
-                        sqlConnection, transaction))
-                    {
-                        await createCmd.ExecuteNonQueryAsync();
-                    }
+                using var copyCmd = new SqlCommand(
+                    $"""
+                     COPY INTO dbo.TotalUsers
+                     FROM '{blobUrl}'
+                     WITH (
+                         FILE_TYPE = 'PARQUET',
+                         CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
+                     );
+                     """,
+                    sqlConnection
+                );
 
-                    using (var copyCmd = new SqlCommand(
-                        $"""
-                         COPY INTO #StagingUsers
-                         FROM '{blobUrl}'
-                         WITH (
-                             FILE_TYPE = 'PARQUET',
-                             CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
-                         );
-                         """,
-                        sqlConnection, transaction))
-                    {
-                        copyCmd.CommandTimeout = 0;
-                        await copyCmd.ExecuteNonQueryAsync();
-                    }
+                copyCmd.CommandTimeout = 0;
+                await copyCmd.ExecuteNonQueryAsync();
 
-                    int stagedCount;
-                    using (var countCmd = new SqlCommand("SELECT COUNT(*) FROM #StagingUsers;", sqlConnection, transaction))
-                    {
-                        stagedCount = (int)await countCmd.ExecuteScalarAsync();
-                    }
-
-                    if (stagedCount == 0)
-                    {
-                        throw new DataException("No users to upload");
-                    }
-
-                    _logger.LogInformation("Copied {count} users from blob {blobName} into staging", stagedCount, blobName);
-
-                    using (var insertCmd = new SqlCommand(
-                        """
-                        INSERT INTO dbo.TotalUsers (Id, Mail, SnapshotDate)
-                        SELECT Id, Mail, @SnapshotDate
-                        FROM #StagingUsers;
-                        """,
-                        sqlConnection, transaction))
-                    {
-                        insertCmd.Parameters.AddWithValue("@SnapshotDate", snapshotDate);
-                        await insertCmd.ExecuteNonQueryAsync();
-                    }
-
-                    transaction.Commit();
-
-                    _logger.LogInformation("Successfully uploaded {count} users to dbo.TotalUsers", stagedCount);
-                }
-                catch
-                {
-                    transaction.Rollback();
-                    throw;
-                }
+                _logger.LogInformation("Successfully uploaded users from {blobName} to dbo.TotalUsers", blobName);
             }
             catch (Exception ex)
             {
