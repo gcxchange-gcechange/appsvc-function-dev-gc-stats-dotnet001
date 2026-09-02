@@ -5,7 +5,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
-using System.Text.Json;
+using Parquet;
+using Parquet.Schema;
 
 namespace GCStats
 {
@@ -18,6 +19,8 @@ namespace GCStats
         public const string TotalUsersContainerName = "users";
         public const string ActiveUsersContainerName = "active-users";
 
+        private const int RowGroupBatchSize = 50_000;
+
         public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
             try
@@ -25,20 +28,51 @@ namespace GCStats
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionUsersArray = Globals.GetAppSetting("exceptionUsersArray", log, config);
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
-                var blobName = $"users-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.json";
+
+                var snapshotDate = DateTime.UtcNow.Date;
+                var blobName = $"users-{DateTime.UtcNow:yyyy-MM-dd}.parquet";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
                 var containerClient = blobServiceClient.GetBlobContainerClient(TotalUsersContainerName);
                 await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
                 var blobClient = containerClient.GetBlobClient(blobName);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-                using var jsonWriter = new Utf8JsonWriter(blobStream);
+                var idField = new DataField<string>("Id");
+                var mailField = new DataField<string>("Mail");
+                var snapshotDateField = new DataField<DateTime>("SnapshotDate");
+                var schema = new ParquetSchema(idField, mailField, snapshotDateField);
 
-                jsonWriter.WriteStartArray();
+                var parquetOptions = new ParquetOptions
+                {
+                    CompressionMethod = CompressionMethod.Snappy
+                };
+
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+
+                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, parquetOptions);
 
                 var graph = Auth.GraphAuth(log);
                 int count = 0;
+
+                var idBuffer = new List<string>(RowGroupBatchSize);
+                var mailBuffer = new List<string>(RowGroupBatchSize);
+                var snapshotDateBuffer = new List<DateTime>(RowGroupBatchSize);
+
+                async Task FlushBatchAsync()
+                {
+                    if (idBuffer.Count == 0) 
+                        return;
+
+                    using var groupWriter = parquetWriter.CreateRowGroup();
+
+                    await groupWriter.WriteAsync(idField, idBuffer);
+                    await groupWriter.WriteAsync(mailField, mailBuffer);
+                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+
+                    idBuffer.Clear();
+                    mailBuffer.Clear();
+                    snapshotDateBuffer.Clear();
+                }
 
                 var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
                 {
@@ -55,11 +89,17 @@ namespace GCStats
                         {
                             if (user.Id != null && !exceptionUsersArray.Contains(user.Id))
                             {
-                                var record = new UserRecord(Id: user.Id, Mail: user.Mail ?? string.Empty);
-                                JsonSerializer.Serialize(jsonWriter, record, Globals.JsonOptions);
+                                idBuffer.Add(user.Id);
+                                mailBuffer.Add(user.Mail ?? string.Empty);
+                                snapshotDateBuffer.Add(snapshotDate);
                                 count++;
+
+                                if (idBuffer.Count >= RowGroupBatchSize)
+                                {
+                                    FlushBatchAsync().GetAwaiter().GetResult();
+                                }
                             }
-                            
+
                             return true;
                         },
                         requestConfiguration =>
@@ -69,10 +109,8 @@ namespace GCStats
                         });
 
                 await pageIterator.IterateAsync();
-
-                jsonWriter.WriteEndArray();
-                await jsonWriter.FlushAsync();
-                await blobStream.FlushAsync();
+                await FlushBatchAsync();
+                await parquetWriter.DisposeAsync();
 
                 log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
 
@@ -82,9 +120,8 @@ namespace GCStats
             {
                 log.LogError("StreamUsersToBlobAsync failed");
                 log.LogError(ex.Message);
+                throw;
             }
-
-            return string.Empty;
         }
     }
 }
