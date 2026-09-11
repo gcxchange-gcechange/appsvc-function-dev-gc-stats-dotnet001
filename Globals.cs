@@ -31,13 +31,15 @@ namespace GCStats
 
         public static DateTime GetDateFromBlob(string blobName, ILogger log)
         {
-            var match = System.Text.RegularExpressions.Regex.Match(blobName, @"(\d{4}-\d{2}-\d{2})\.json$");
-            if (!match.Success)
+            // TODO: Switch to parquet only when refactor is done.
+            var matchJSON = System.Text.RegularExpressions.Regex.Match(blobName, @"(\d{4}-\d{2}-\d{2})\.json$");
+            var matchParquet = System.Text.RegularExpressions.Regex.Match(blobName, @"(\d{4}-\d{2}-\d{2})\.parquet$");
+            if (!matchJSON.Success && !matchParquet.Success)
             {
                 throw new FormatException($"Could not extract date from blob name: {blobName}");
             }
 
-            var snapshotDate = DateTime.ParseExact(match.Groups[1].Value, BlobDateFormat, System.Globalization.CultureInfo.InvariantCulture);
+            var snapshotDate = DateTime.ParseExact(matchJSON.Success ? matchJSON.Groups[1].Value : matchParquet.Groups[1].Value, BlobDateFormat, System.Globalization.CultureInfo.InvariantCulture);
 
             return snapshotDate;
         }
