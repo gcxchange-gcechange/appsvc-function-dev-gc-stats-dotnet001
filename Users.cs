@@ -30,7 +30,7 @@ namespace GCStats
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
 
                 var snapshotDate = DateTime.UtcNow.Date;
-                var blobName = $"users-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+                var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
                 var containerClient = blobServiceClient.GetBlobContainerClient(TotalUsersContainerName);

@@ -55,9 +55,9 @@ namespace GCStats
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
 
                 var snapshotDate = DateTime.UtcNow.Date;
-                var communitiesBlobName = $"communities-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
-                var ownersBlobName = $"community-owners-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
-                var membersBlobName = $"community-members-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+                var communitiesBlobName = $"{TotalCommunitiesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+                var ownersBlobName = $"{CommunityOwnersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+                var membersBlobName = $"{CommunityMembersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 // TotalCommunities Fields
                 var idField = new DataField<string>("Id");

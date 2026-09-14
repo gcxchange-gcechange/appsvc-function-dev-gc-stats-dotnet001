@@ -6,8 +6,6 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Data;
-using System.Text.Json;
 
 namespace GCStats
 {
@@ -35,9 +33,9 @@ namespace GCStats
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), credential);
 
-                var date = blobName.Replace("communities-", string.Empty).Replace(".parquet", string.Empty);
-                var ownersBlobName = $"community-owners-{date}.parquet";
-                var membersBlobName = $"community-members-{date}.parquet";
+                var date = blobName.Replace($"{Communities.TotalCommunitiesContainerName}-", string.Empty).Replace(".parquet", string.Empty);
+                var ownersBlobName = $"{Communities.CommunityOwnersContainerName}-{date}.parquet";
+                var membersBlobName = $"{Communities.CommunityMembersContainerName}-{date}.parquet";
 
                 var communitiesContainerClient = blobServiceClient.GetBlobContainerClient(Communities.TotalCommunitiesContainerName);
                 var ownersContainerClient = blobServiceClient.GetBlobContainerClient(Communities.CommunityOwnersContainerName);
