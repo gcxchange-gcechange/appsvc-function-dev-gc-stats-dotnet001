@@ -30,7 +30,6 @@ namespace GCStats
         public const string TotalCommunitiesContainerName = "communities";
         public const string CommunityOwnersContainerName = "community-owners";
         public const string CommunityMembersContainerName = "community-members";
-        private const int RowGroupBatchSize = 50_000;
 
         public static async Task<string> StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
         {
@@ -111,12 +110,12 @@ namespace GCStats
                 int membersCount = 0;
 
                 // Create the buffers and batch writes for communities, owners, and members
-                var idBuffer = new List<string>(RowGroupBatchSize);
-                var displayNameBuffer = new List<string>(RowGroupBatchSize);
-                var sensitivityLabelIdBuffer = new List<string>(RowGroupBatchSize);
-                var creationDateBuffer = new List<DateTime>(RowGroupBatchSize);
-                var lastActivityDateBuffer = new List<DateTime>(RowGroupBatchSize);
-                var communitySnapshotDateBuffer = new List<DateTime>(RowGroupBatchSize);
+                var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var displayNameBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var sensitivityLabelIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var creationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                var lastActivityDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                var communitySnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
                 async Task FlushCommunitiesBatchAsync()
                 {
@@ -139,9 +138,9 @@ namespace GCStats
                     communitySnapshotDateBuffer.Clear();
                 }
 
-                var ownerUserIdBuffer = new List<string>(RowGroupBatchSize);
-                var ownerCommunityIdBuffer = new List<string>(RowGroupBatchSize);
-                var ownerSnapshotDateBuffer = new List<DateTime>(RowGroupBatchSize);
+                var ownerUserIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var ownerCommunityIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var ownerSnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
                 async Task FlushOwnersBatchAsync()
                 {
@@ -158,9 +157,9 @@ namespace GCStats
                     ownerSnapshotDateBuffer.Clear();
                 }
 
-                var memberUserIdBuffer = new List<string>(RowGroupBatchSize);
-                var memberCommunityIdBuffer = new List<string>(RowGroupBatchSize);
-                var memberSnapshotDateBuffer = new List<DateTime>(RowGroupBatchSize);
+                var memberUserIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var memberCommunityIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var memberSnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
                 async Task FlushMembersBatchAsync()
                 {
@@ -233,13 +232,13 @@ namespace GCStats
                                 }
 
                                 // Write to blob once the buffer reaches the batch size
-                                if (idBuffer.Count >= RowGroupBatchSize)
+                                if (idBuffer.Count >= Globals.RowGroupBatchSize)
                                     await FlushCommunitiesBatchAsync();
 
-                                if (ownerUserIdBuffer.Count >= RowGroupBatchSize)
+                                if (ownerUserIdBuffer.Count >= Globals.RowGroupBatchSize)
                                     await FlushOwnersBatchAsync();
 
-                                if (memberUserIdBuffer.Count >= RowGroupBatchSize)
+                                if (memberUserIdBuffer.Count >= Globals.RowGroupBatchSize)
                                     await FlushMembersBatchAsync();
 
                                 communitiesCount++;
