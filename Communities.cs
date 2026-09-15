@@ -30,6 +30,7 @@ namespace GCStats
         public const string TotalCommunitiesContainerName = "communities";
         public const string CommunityOwnersContainerName = "community-owners";
         public const string CommunityMembersContainerName = "community-members";
+        private const int ReportDateRangeInDays = 7;
 
         public static async Task<string> StreamCommunitiesToBlobAsync(ILogger log, IConfiguration config)
         {
@@ -38,13 +39,13 @@ namespace GCStats
                 var graph = Auth.GraphAuth(log);
 
                 // Get teams activity report
-                using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod("D7").GetAsync();
+                using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod($"D{ReportDateRangeInDays}").GetAsync();
                 using var teamsUsageReader = new StreamReader(teamsUsageStream);
                 using var teamsUsage = new CsvReader(teamsUsageReader, CultureInfo.InvariantCulture);
                 var teamsActivityRecords = teamsUsage.GetRecords<TeamActivityRecord>().ToList();
 
                 // Get sharepoint usage report
-                using var sharepointUsageStream = await graph.Reports.GetSharePointSiteUsageDetailWithPeriod("D7").GetAsync();
+                using var sharepointUsageStream = await graph.Reports.GetSharePointSiteUsageDetailWithPeriod($"D{ReportDateRangeInDays}").GetAsync();
                 using var sharepointUsageReader = new StreamReader(sharepointUsageStream);
                 using var sharepointUsage = new CsvReader(sharepointUsageReader, CultureInfo.InvariantCulture);
                 var sharepointUsageRecords = sharepointUsage.GetRecords<SharePointUsageRecord>().ToList();
@@ -350,7 +351,7 @@ namespace GCStats
 
             try
             {
-                var yesterdayStart = DateTime.UtcNow.Date.AddDays(-1);
+                var yesterdayStart = DateTime.UtcNow.Date.AddDays(-ReportDateRangeInDays);
                 var yesterdayEnd = DateTime.UtcNow.Date;
 
                 var auditsPage = await graph.AuditLogs.DirectoryAudits.GetAsync(rc =>
@@ -378,7 +379,7 @@ namespace GCStats
 
                             if (targetedActivity.Contains(audit.ActivityDisplayName) && audit.ActivityDateTime.HasValue)
                             {
-                                // The group itself is one of the TargetResources
+                                // The group itself is one of the TargetResources (type "Group")
                                 var groupTarget = audit.TargetResources?.FirstOrDefault(t => t.Type == "Group");
 
                                 if (groupTarget?.Id != null)
