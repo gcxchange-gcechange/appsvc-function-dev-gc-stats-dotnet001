@@ -19,8 +19,6 @@ namespace GCStats
         public const string TotalUsersContainerName = "users";
         public const string ActiveUsersContainerName = "active-users";
 
-        private const int RowGroupBatchSize = 50_000;
-
         public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
         {
             try
@@ -30,7 +28,7 @@ namespace GCStats
                 var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
 
                 var snapshotDate = DateTime.UtcNow.Date;
-                var blobName = $"users-{DateTime.UtcNow:yyyy-MM-dd}.parquet";
+                var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
                 var containerClient = blobServiceClient.GetBlobContainerClient(TotalUsersContainerName);
@@ -54,9 +52,9 @@ namespace GCStats
                 var graph = Auth.GraphAuth(log);
                 int count = 0;
 
-                var idBuffer = new List<string>(RowGroupBatchSize);
-                var mailBuffer = new List<string>(RowGroupBatchSize);
-                var snapshotDateBuffer = new List<DateTime>(RowGroupBatchSize);
+                var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var mailBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
                 async Task FlushBatchAsync()
                 {
@@ -94,7 +92,7 @@ namespace GCStats
                                 snapshotDateBuffer.Add(snapshotDate);
                                 count++;
 
-                                if (idBuffer.Count >= RowGroupBatchSize)
+                                if (idBuffer.Count >= Globals.RowGroupBatchSize)
                                 {
                                     FlushBatchAsync().GetAwaiter().GetResult();
                                 }

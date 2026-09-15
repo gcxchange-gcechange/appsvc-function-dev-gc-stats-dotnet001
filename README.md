@@ -23,6 +23,7 @@ In order for the application to run you will need the following settings in your
 | storageAccountUrl | The address for the storage account
 | fabricWarehouseServer | The SQL connection string of the fabric warehouse
 | fabricWarehouseDatabase | The name of the fabric warehouse
+| workspaceId | The workspace Id for log analytics
 | exceptionUsersArray | A comma separated string of user Ids that will be ignored for all user related metrics
 | exceptionGroupsArray | A comma separated string of group Ids that will be ignored for all group related metrics 
 | isLocal | Optional. Should be set to `true` if you want to use `AzureCliCredential` for authentication.
