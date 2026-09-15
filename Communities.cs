@@ -41,13 +41,13 @@ namespace GCStats
                 using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod("D7").GetAsync();
                 using var teamsUsageReader = new StreamReader(teamsUsageStream);
                 using var teamsUsage = new CsvReader(teamsUsageReader, CultureInfo.InvariantCulture);
-                var teamsActivityRecords = teamsUsage.GetRecords<TeamActivityRecord>();
+                var teamsActivityRecords = teamsUsage.GetRecords<TeamActivityRecord>().ToList();
 
                 // Get sharepoint usage report
                 using var sharepointUsageStream = await graph.Reports.GetSharePointSiteUsageDetailWithPeriod("D7").GetAsync();
                 using var sharepointUsageReader = new StreamReader(sharepointUsageStream);
                 using var sharepointUsage = new CsvReader(sharepointUsageReader, CultureInfo.InvariantCulture);
-                var sharepointUsageRecords = sharepointUsage.GetRecords<SharePointUsageRecord>();
+                var sharepointUsageRecords = sharepointUsage.GetRecords<SharePointUsageRecord>().ToList();
 
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
@@ -193,15 +193,15 @@ namespace GCStats
                         {
                             if (group.Id != null && !exceptionGroupsArray.Contains(group.Id))
                             {
-                                DateTime lastActivityDate = DateTime.MinValue;
+                                var lastActivityDate = group.CreatedDateTime?.UtcDateTime ?? DateTime.MinValue;
                                 var site = await graph.Groups[group.Id].Sites["root"].GetAsync();
 
                                 // Find the team owner/members
                                 var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
 
                                 // Check reports for last activity data
-                                var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id));
-                                var sharePointUsageRecord = site != null && site.Id != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(site.Id)) : new SharePointUsageRecord();
+                                var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id, StringComparison.OrdinalIgnoreCase));
+                                var sharePointUsageRecord = site != null && site.Id != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(site.Id, StringComparison.OrdinalIgnoreCase)) : new SharePointUsageRecord();
 
                                 if (teamsActivityRecord != null && teamsActivityRecord.LastActivityDate != null)
                                     lastActivityDate = (DateTime)teamsActivityRecord.LastActivityDate;
