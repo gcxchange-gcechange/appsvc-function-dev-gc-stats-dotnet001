@@ -41,13 +41,16 @@ namespace GCStats
                 using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod("D7").GetAsync();
                 using var teamsUsageReader = new StreamReader(teamsUsageStream);
                 using var teamsUsage = new CsvReader(teamsUsageReader, CultureInfo.InvariantCulture);
-                var teamsActivityRecords = teamsUsage.GetRecords<TeamActivityRecord>();
+                var teamsActivityRecords = teamsUsage.GetRecords<TeamActivityRecord>().ToList();
 
                 // Get sharepoint usage report
                 using var sharepointUsageStream = await graph.Reports.GetSharePointSiteUsageDetailWithPeriod("D7").GetAsync();
                 using var sharepointUsageReader = new StreamReader(sharepointUsageStream);
                 using var sharepointUsage = new CsvReader(sharepointUsageReader, CultureInfo.InvariantCulture);
-                var sharepointUsageRecords = sharepointUsage.GetRecords<SharePointUsageRecord>();
+                var sharepointUsageRecords = sharepointUsage.GetRecords<SharePointUsageRecord>().ToList();
+
+                // Get the directory audits for group membership changes
+                var membershipChangeDates = await GetGroupMembershipChangeDatesAsync(graph, log);
 
                 var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
@@ -193,21 +196,24 @@ namespace GCStats
                         {
                             if (group.Id != null && !exceptionGroupsArray.Contains(group.Id))
                             {
-                                DateTime lastActivityDate = DateTime.MinValue;
+                                var lastActivityDate = group.CreatedDateTime?.UtcDateTime ?? DateTime.MinValue;
                                 var site = await graph.Groups[group.Id].Sites["root"].GetAsync();
 
                                 // Find the team owner/members
                                 var (owners, members) = await GetOwnersAndMembersAsync(graph, group.Id!, log);
 
                                 // Check reports for last activity data
-                                var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id));
-                                var sharePointUsageRecord = site != null && site.Id != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(site.Id)) : new SharePointUsageRecord();
+                                var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id, StringComparison.OrdinalIgnoreCase));
+                                var sharePointUsageRecord = site != null && site.Id != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(site.Id, StringComparison.OrdinalIgnoreCase)) : new SharePointUsageRecord();
 
                                 if (teamsActivityRecord != null && teamsActivityRecord.LastActivityDate != null)
                                     lastActivityDate = (DateTime)teamsActivityRecord.LastActivityDate;
 
                                 if (sharePointUsageRecord != null && sharePointUsageRecord.LastActivityDate != null)
                                     lastActivityDate = lastActivityDate > (DateTime)sharePointUsageRecord.LastActivityDate ? lastActivityDate : (DateTime)sharePointUsageRecord.LastActivityDate;
+
+                                if (membershipChangeDates.TryGetValue(group.Id, out var membershipChangeDate))
+                                    lastActivityDate = lastActivityDate > membershipChangeDate ? lastActivityDate : membershipChangeDate;
 
                                 // Add the data to be written to the Parquet files
                                 idBuffer.Add(group.Id);
@@ -336,6 +342,65 @@ namespace GCStats
 
             await iterator.IterateAsync();
             return results.ToArray();
+        }
+
+        private static async Task<Dictionary<string, DateTime>> GetGroupMembershipChangeDatesAsync(GraphServiceClient graph, ILogger log)
+        {
+            var result = new Dictionary<string, DateTime>();
+
+            try
+            {
+                var yesterdayStart = DateTime.UtcNow.Date.AddDays(-1);
+                var yesterdayEnd = DateTime.UtcNow.Date;
+
+                var auditsPage = await graph.AuditLogs.DirectoryAudits.GetAsync(rc =>
+                {
+                    rc.QueryParameters.Filter = $"category eq 'GroupManagement' and activityDateTime ge {yesterdayStart:o} and activityDateTime lt {yesterdayEnd:o}";
+                    rc.QueryParameters.Top = 999;
+                    rc.QueryParameters.Select = ["activityDisplayName", "activityDateTime", "targetResources"];
+                });
+
+                string[] targetedActivity = 
+                {
+                    "Add member to group",
+                    "Remove member from group",
+                    "Add owner to group",
+                    "Remove owner from group"
+                };
+
+                var iterator = PageIterator<DirectoryAudit, DirectoryAuditCollectionResponse>
+                    .CreatePageIterator(
+                        graph,
+                        auditsPage!,
+                        audit =>
+                        {
+                            log.LogInformation("Activity: {Activity}, Date: {Date}", audit.ActivityDisplayName, audit.ActivityDateTime);
+
+                            if (targetedActivity.Contains(audit.ActivityDisplayName) && audit.ActivityDateTime.HasValue)
+                            {
+                                // The group itself is one of the TargetResources
+                                var groupTarget = audit.TargetResources?.FirstOrDefault(t => t.Type == "Group");
+
+                                if (groupTarget?.Id != null)
+                                {
+                                    var changeDate = audit.ActivityDateTime.Value.UtcDateTime;
+
+                                    if (!result.TryGetValue(groupTarget.Id, out var existing) || changeDate > existing)
+                                        result[groupTarget.Id] = changeDate;
+                                }
+                            }
+
+                            return true;
+                        });
+
+                await iterator.IterateAsync();
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Failed to fetch group membership change audits");
+            }
+
+            return result;
         }
     }
 }
