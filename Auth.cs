@@ -2,6 +2,7 @@
 using Azure.Identity;
 using Azure.Monitor.Query.Logs;
 using Azure.Security.KeyVault.Secrets;
+using Azure.Storage.Blobs;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -123,6 +124,28 @@ namespace GCStats
 
                 return connection;
             } 
+            catch (Exception ex)
+            {
+                log.LogError(ex.ToString());
+                throw;
+            }
+        }
+
+        public static async Task<BlobClient> GetBlobClient(string containerName, string blobName, ILogger log, IConfiguration config)
+        {
+            try
+            {
+                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
+                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+
+                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
+                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+
+                await containerClient.CreateIfNotExistsAsync(Azure.Storage.Blobs.Models.PublicAccessType.None);
+
+                return containerClient.GetBlobClient(blobName);
+
+            }
             catch (Exception ex)
             {
                 log.LogError(ex.ToString());
