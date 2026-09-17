@@ -48,81 +48,117 @@ namespace GCStats
                 var idField = new DataField<string>("Id");
                 var siteIdField = new DataField<string>("SiteId");
                 var titleField = new DataField<string>("Title");
-                var viewsLifeTimeField = new DataField<string>("ViewsLifeTime");
+                var urlField = new DataField<string>("URL");
+                var viewsField = new DataField<string>("Views");
                 var viewsPreviousDayField = new DataField<string>("ViewsPreviousDay");
                 var languageField = new DataField<string>("Language");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
                 var parquetOptions = new ParquetOptions
                 {
-                    CompressionMethod = CompressionMethod.Zstd
+                    CompressionMethod = CompressionMethod.Snappy
                 };
 
-                const int PageSize = 10;
-                int from = 0;
-                long total = 0;
-                bool moreResultsAvailable;
+                const int PageSize = 500;
+                long runningTotal = 0;
 
-                do
+                var endDate = DateTime.UtcNow;
+                var startDate = new DateTime(2020, 1, 1);
+
+                var monthRanges = new List<(DateTime Start, DateTime End)>();
+                var cursor = new DateTime(startDate.Year, startDate.Month, 1);
+
+                while (cursor < endDate)
                 {
-                    var searchResponse = await graphClient.Search.Query.PostAsQueryPostResponseAsync(
-                        new QueryPostRequestBody
-                        {
-                            Requests = new List<SearchRequest>
+                    var monthStart = cursor;
+                    var monthEnd = cursor.AddMonths(1).AddSeconds(-1);
+                    monthRanges.Add((monthStart, monthEnd));
+                    cursor = cursor.AddMonths(1);
+                }
+
+                foreach (var (monthStart, monthEnd) in monthRanges)
+                {
+                    int from = 0;
+                    long total = 0;
+                    bool moreResultsAvailable;
+
+                    var startCreation = monthStart.ToString("yyyy-MM-ddTHH:mm:ss");
+                    var endCreation= monthEnd.ToString("yyyy-MM-ddTHH:mm:ss");
+
+                    _logger.LogInformation($"Searching: {monthStart:yyyy-MM}");
+
+                    do
+                    {
+                        var searchResponse = await graphClient.Search.Query.PostAsQueryPostResponseAsync(
+                            new QueryPostRequestBody
                             {
+                                Requests = new List<SearchRequest>
+                                {
                                 new SearchRequest
                                 {
                                     EntityTypes = new List<EntityType?> { EntityType.ListItem },
                                     Region = "CAN",
                                     Query = new SearchQuery
                                     {
-                                        QueryString = "FileExtension:aspx AND NOT PromotedState:2 AND NOT Title:DispForm.aspx" // Excludes news posts
+                                        QueryString = $"FileExtension:aspx AND NOT PromotedState:2 AND NOT Author:\"System Account\" AND Created:{startCreation}..{endCreation}"
                                     },
-                                    Fields = new List<string> { "UniqueId", "SiteId", "Title", "LastModifiedTime", "ViewsLifeTime", "ViewsLifeTimeUniqueUsers", "ViewsLAst1Days", "SPTranslationLanguage" },
+                                    Fields = new List<string> { "UniqueId", "SiteId", "Title", "Path", "Created", "LastModifiedTime", "ViewsLifeTime", "ViewsLast1Days", "SPTranslationLanguage", "Author", "EditorOWSUSER" },
                                     From = from,
                                     Size = PageSize,
                                     SortProperties = new List<SortProperty>
                                     {
-                                        new SortProperty { 
-                                            Name = "ViewsLifeTime", 
-                                            IsDescending = true 
+                                        new SortProperty
+                                        {
+                                            Name = "ViewsLifeTime",
+                                            IsDescending = true
                                         }
                                     }
                                 }
+                                }
+                            }
+                        );
+
+                        var container = searchResponse?.Value?.FirstOrDefault()?.HitsContainers?.FirstOrDefault();
+
+                        var hits = container?.Hits ?? new List<SearchHit>();
+                        total = container?.Total ?? 0;
+                        runningTotal += total;
+                        moreResultsAvailable = container?.MoreResultsAvailable ?? false;
+
+                        foreach (var hit in hits)
+                        {
+                            var listItem = hit.Resource as ListItem;
+
+                            if (listItem != null && listItem.Fields != null && listItem.Fields.AdditionalData != null)
+                            {
+                                var fields = listItem.Fields.AdditionalData;
+                                var id = GetField(fields, "UniqueId");
+                                var siteId = GetField(fields, "SiteId");
+                                var title = GetField(fields, "Title");
+                                var path = GetField(fields, "Path");
+                                var created = GetField(fields, "Created");
+                                var lastModifiedTime = GetField(fields, "LastModifiedTime");
+                                var views = GetField(fields, "ViewsLifeTime") ?? "0";
+                                var viewsPreviousDay = GetField(fields, "ViewsLast1Days") ?? "0";
+                                var language = GetField(fields, "SPTranslationLanguage") ?? "en";
+                                var author = GetField(fields, "Author");
+                                var editor = GetField(fields, "EditorOWSUSER");
+
+                                //_logger.LogInformation($"\nTitle: {title}\nCreated: {created}\nLastModifiedTime: {lastModifiedTime}\nPath: {path}\nViews: {views}\nViewsPreviousDay: {viewsPreviousDay}\nLanguage: {language}\nAuthor: {author}\nEditor: {editor}\n");
+
+                                // TODO: Sort by SiteID and UniqueId before writing parquet
                             }
                         }
-                     );
 
-                    var container = searchResponse?.Value?.FirstOrDefault()?.HitsContainers?.FirstOrDefault();
-
-                    var hits = container?.Hits ?? new List<SearchHit>();
-                    total = container?.Total ?? 0;
-                    moreResultsAvailable = container?.MoreResultsAvailable ?? false;
-
-                    foreach (var hit in hits)
-                    {
-                        var listItem = hit.Resource as ListItem;
-
-                        if (listItem != null && listItem.Fields != null && listItem.Fields.AdditionalData != null)
-                        {
-                            var fields = listItem.Fields.AdditionalData;
-                            var id = GetField(fields, "uniqueId");
-                            var siteId = GetField(fields, "siteId");
-                            var title = GetField(fields, "title");
-                            var views = GetField(fields, "viewsLifeTime") ?? "0";
-                            var viewsPreviousDay = GetField(fields, "viewsLast1Days") ?? "0";
-                            var language = GetField(fields, "SPTranslationLanguage");
-
-                            // TODO: Sort by SiteID and UniqueId before writing parquet
-
-                            _logger.LogInformation("Title: {Title}, Views: {Views}, ViewsPreviousDay: {ViewsPreviousDay}, Language: {Language}", title, views, viewsPreviousDay, language);
-                        }
+                        if (hits.Count == 0) break;
+                        from += hits.Count;
                     }
+                    while (moreResultsAvailable && from < total && from < 10000); // This is capped at 10,000 - might need to do seperate queries by creation date etc to get all results
 
-                    if (hits.Count == 0) break;
-                    from += hits.Count;
+                    _logger.LogInformation($"Found {total} pages for {monthStart:yyyy-MM}");
                 }
-                while (moreResultsAvailable && from < total);
+
+                _logger.LogInformation($"Processed {runningTotal} total pages");
 
                 return blobName;
             }
