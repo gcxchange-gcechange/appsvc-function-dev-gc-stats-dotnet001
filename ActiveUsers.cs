@@ -46,14 +46,14 @@ namespace GCStats
         {
             try
             {
-                var workspaceId = Globals.GetAppSetting("workspaceId", _logger, _config);
-                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", _logger, _config);
-                var isLocal = Globals.GetAppSetting("isLocal", _logger, _config, false);
+                var workspaceId = Auth.GetAppSetting("workspaceId", _logger, _config);
+                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", _logger, _config);
+                var isLocal = Auth.GetAppSetting("isLocal", _logger, _config, false);
 
                 var snapshotDate = DateTime.UtcNow.Date;
                 var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
-                var logsQueryClient = await Auth.LogsAuth(_logger);
+                var logsQueryClient = await Auth.GetLogsQueryClient(_logger);
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
                 
                 var containerClient = blobServiceClient.GetBlobContainerClient(Users.ActiveUsersContainerName);

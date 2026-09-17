@@ -23,9 +23,9 @@ namespace GCStats
         {
             try
             {
-                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
-                var exceptionUsersArray = Globals.GetAppSetting("exceptionUsersArray", log, config);
-                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", log, config);
+                var exceptionUsersArray = Auth.GetAppSetting("exceptionUsersArray", log, config);
+                var isLocal = Auth.GetAppSetting("isLocal", log, config, false);
 
                 var snapshotDate = DateTime.UtcNow.Date;
                 var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
@@ -49,7 +49,7 @@ namespace GCStats
 
                 await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, parquetOptions);
 
-                var graph = Auth.GraphAuth(log);
+                var graph = Auth.GetGraphServiceClient(log);
                 int count = 0;
 
                 var idBuffer = new List<string>(Globals.RowGroupBatchSize);

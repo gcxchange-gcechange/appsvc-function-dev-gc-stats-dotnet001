@@ -36,7 +36,7 @@ namespace GCStats
         {
             try
             {
-                var graph = Auth.GraphAuth(log);
+                var graph = Auth.GetGraphServiceClient(log);
 
                 // Get teams activity report
                 using var teamsUsageStream = await graph.Reports.GetTeamsTeamActivityDetailWithPeriod($"D{ReportDateRangeInDays}").GetAsync();
@@ -53,9 +53,9 @@ namespace GCStats
                 // Get the directory audits for group membership changes
                 var membershipChangeDates = await GetGroupMembershipChangeDatesAsync(graph, log);
 
-                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
-                var exceptionGroupsArray = Globals.GetAppSetting("exceptionGroupsArray", log, config);
-                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", log, config);
+                var exceptionGroupsArray = Auth.GetAppSetting("exceptionGroupsArray", log, config);
+                var isLocal = Auth.GetAppSetting("isLocal", log, config, false);
 
                 var snapshotDate = DateTime.UtcNow.Date;
                 var communitiesBlobName = $"{TotalCommunitiesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";

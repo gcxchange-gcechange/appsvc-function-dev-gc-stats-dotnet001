@@ -43,7 +43,7 @@ namespace GCStats
                 var blobName = $"{PageViewsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 var blobClient = Auth.GetBlobClient(PageViewsContainerName, blobName, _logger, _config);
-                var graphClient = Auth.GraphAuth(_logger);
+                var graphClient = Auth.GetGraphServiceClient(_logger);
 
                 var idField = new DataField<string>("Id");
                 var siteIdField = new DataField<string>("SiteId");
@@ -63,7 +63,7 @@ namespace GCStats
                 long runningTotal = 0;
 
                 var endDate = DateTime.UtcNow;
-                var startDate = new DateTime(2020, 1, 1);
+                var startDate = new DateTime(2021, 1, 1);
 
                 var monthRanges = new List<(DateTime Start, DateTime End)>();
                 var cursor = new DateTime(startDate.Year, startDate.Month, 1);
@@ -121,8 +121,8 @@ namespace GCStats
                         var container = searchResponse?.Value?.FirstOrDefault()?.HitsContainers?.FirstOrDefault();
 
                         var hits = container?.Hits ?? new List<SearchHit>();
+                        runningTotal += hits.Count;
                         total = container?.Total ?? 0;
-                        runningTotal += total;
                         moreResultsAvailable = container?.MoreResultsAvailable ?? false;
 
                         foreach (var hit in hits)
@@ -153,7 +153,7 @@ namespace GCStats
                         if (hits.Count == 0) break;
                         from += hits.Count;
                     }
-                    while (moreResultsAvailable && from < total && from < 10000); // This is capped at 10,000 - might need to do seperate queries by creation date etc to get all results
+                    while (moreResultsAvailable && from < total /*&& from < 10000*/);
 
                     _logger.LogInformation($"Found {total} pages for {monthStart:yyyy-MM}");
                 }

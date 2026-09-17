@@ -12,7 +12,7 @@ namespace GCStats
 {
     static class Auth
     {
-        public static GraphServiceClient GraphAuth(ILogger log)
+        public static GraphServiceClient GetGraphServiceClient(ILogger log)
         {
             IConfiguration config = new ConfigurationBuilder()
            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -20,11 +20,11 @@ namespace GCStats
            .Build();
 
             var scopes = new string[] { "https://graph.microsoft.com/.default" };
-            var keyVaultUrl = Globals.GetAppSetting("keyVaultUrl", log, config);
-            var secretName = Globals.GetAppSetting("secretName", log, config);
-            var tenantId = Globals.GetAppSetting("tenantId", log, config);
-            var clientId = Globals.GetAppSetting("clientId", log, config);
-            var workspaceId = Globals.GetAppSetting("workspaceId", log, config);
+            var keyVaultUrl = GetAppSetting("keyVaultUrl", log, config);
+            var secretName = GetAppSetting("secretName", log, config);
+            var tenantId = GetAppSetting("tenantId", log, config);
+            var clientId = GetAppSetting("clientId", log, config);
+            var workspaceId = GetAppSetting("workspaceId", log, config);
 
             SecretClientOptions options = new SecretClientOptions()
             {
@@ -42,7 +42,7 @@ namespace GCStats
 
             try
             {
-                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+                var isLocal = GetAppSetting("isLocal", log, config, false);
                 client = new SecretClient(new Uri(keyVaultUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential(), options);
                 secret = client.GetSecret(secretName);
             }
@@ -63,7 +63,7 @@ namespace GCStats
             return graphClient;
         }
 
-        public static async Task<LogsQueryClient> LogsAuth(ILogger log)
+        public static async Task<LogsQueryClient> GetLogsQueryClient(ILogger log)
         {
             try
             {
@@ -72,11 +72,11 @@ namespace GCStats
                .AddEnvironmentVariables()
                .Build();
 
-                var tenantId = Globals.GetAppSetting("tenantId", log, config);
-                var clientId = Globals.GetAppSetting("clientId", log, config);
-                var secretName = Globals.GetAppSetting("secretName", log, config);
-                var keyVaultUrl = Globals.GetAppSetting("keyVaultUrl", log, config);
-                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+                var tenantId = GetAppSetting("tenantId", log, config);
+                var clientId = GetAppSetting("clientId", log, config);
+                var secretName = GetAppSetting("secretName", log, config);
+                var keyVaultUrl = GetAppSetting("keyVaultUrl", log, config);
+                var isLocal = GetAppSetting("isLocal", log, config, false);
 
                 var secretClient = new SecretClient(new Uri(keyVaultUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
 
@@ -98,9 +98,9 @@ namespace GCStats
         {
             try
             {
-                var warehouseServer = Globals.GetAppSetting("fabricWarehouseServer", log, config);
-                var warehouseDatabase = Globals.GetAppSetting("fabricWarehouseDatabase", log, config);
-                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+                var warehouseServer = GetAppSetting("fabricWarehouseServer", log, config);
+                var warehouseDatabase = GetAppSetting("fabricWarehouseDatabase", log, config);
+                var isLocal = GetAppSetting("isLocal", log, config, false);
 
                 // requires TCP 1433
                 var connectionString =
@@ -135,8 +135,8 @@ namespace GCStats
         {
             try
             {
-                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
-                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
+                var storageAccountUrl = GetAppSetting("storageAccountUrl", log, config);
+                var isLocal = GetAppSetting("isLocal", log, config, false);
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
                 var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
@@ -151,6 +151,20 @@ namespace GCStats
                 log.LogError(ex.ToString());
                 throw;
             }
+        }
+
+        public static string GetAppSetting(string settingName, ILogger log, IConfiguration config, bool isMandatory = true)
+        {
+            var value = config[settingName];
+
+            if (value == null && isMandatory)
+            {
+                var msg = $"{settingName} is missing from the environment variables or local.settings.json";
+                log.LogError(msg);
+                throw new MissingFieldException(msg);
+            }
+
+            return value ?? string.Empty;
         }
     }
 }
