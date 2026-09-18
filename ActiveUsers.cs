@@ -50,7 +50,7 @@ namespace GCStats
                 var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 var blobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, blobName, _logger, _config);
-                var logsQueryClient = await Auth.GetLogsQueryClient(_logger);
+                var logsQueryClient = Auth.GetLogsQueryClient(_logger);
 
                 string query = @"
                   SigninLogs | where TimeGenerated >= ago(24h)

@@ -15,9 +15,17 @@ namespace GCStats
     {
         private static GraphServiceClient? _graphClient;
         private static DateTimeOffset _graphCreatedAt;
-        private static readonly TimeSpan _graphMaxAge = TimeSpan.FromHours(23);
         private static readonly object _graphLock = new object();
 
+        private static LogsQueryClient? _logsClient;
+        private static DateTimeOffset _logsCreatedAt;
+        private static readonly object _logsLock = new object();
+
+        private static Task<SqlConnection>? _sqlConnection;
+        private static DateTimeOffset _sqlCreatedAt;
+        private static readonly object _sqlLock = new object();
+
+        private static readonly TimeSpan _maxAge = TimeSpan.FromHours(23);
 
         public static GraphServiceClient GetGraphServiceClient(ILogger log)
         {
@@ -26,7 +34,7 @@ namespace GCStats
 
             lock (_graphLock)
             {
-                if (_graphClient == null || DateTimeOffset.UtcNow - _graphCreatedAt >= _graphMaxAge)
+                if (_graphClient == null || DateTimeOffset.UtcNow - _graphCreatedAt >= _maxAge)
                 {
                     _graphClient = BuildGraphServiceClient(log);
                     _graphCreatedAt = DateTimeOffset.UtcNow;
@@ -36,7 +44,41 @@ namespace GCStats
             return _graphClient;
         }
 
-        public static GraphServiceClient BuildGraphServiceClient(ILogger log)
+        public static LogsQueryClient GetLogsQueryClient(ILogger log)
+        {
+            if (_logsClient != null)
+                return _logsClient;
+
+            lock (_logsLock)
+            {
+                if (_logsClient == null || DateTimeOffset.UtcNow - _logsCreatedAt >= _maxAge)
+                {
+                    _logsClient = BuildLogsQueryClient(log);
+                    _logsCreatedAt = DateTimeOffset.UtcNow;
+                }
+            }
+
+            return _logsClient;
+        }
+
+        public static Task<SqlConnection> GetSqlConnection(ILogger log, IConfiguration config)
+        {
+            if (_sqlConnection != null)
+                return _sqlConnection;
+
+            lock (_sqlLock)
+            {
+                if (_sqlConnection == null || DateTimeOffset.UtcNow - _sqlCreatedAt >= _maxAge)
+                {
+                    _sqlConnection = BuildSqlConnection(log, config);
+                    _sqlCreatedAt = DateTimeOffset.UtcNow;
+                }
+            }
+
+            return _sqlConnection;
+        }
+
+        private static GraphServiceClient BuildGraphServiceClient(ILogger log)
         {
             IConfiguration config = new ConfigurationBuilder()
            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -115,7 +157,7 @@ namespace GCStats
             return graphClient;
         }
 
-        public static async Task<LogsQueryClient> GetLogsQueryClient(ILogger log)
+        private static LogsQueryClient BuildLogsQueryClient(ILogger log)
         {
             try
             {
@@ -146,7 +188,7 @@ namespace GCStats
             }
         }
 
-        public static async Task<SqlConnection> GetSqlConnection(ILogger log, IConfiguration config)
+        private static async Task<SqlConnection> BuildSqlConnection(ILogger log, IConfiguration config)
         {
             try
             {
