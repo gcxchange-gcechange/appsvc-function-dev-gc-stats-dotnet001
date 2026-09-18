@@ -1,7 +1,4 @@
-﻿using Azure.Identity;
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using CsvHelper;
+﻿using CsvHelper;
 using GCStats.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;

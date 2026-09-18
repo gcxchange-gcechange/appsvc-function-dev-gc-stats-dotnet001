@@ -7,12 +7,36 @@ using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
+using Microsoft.Kiota.Http.HttpClientLibrary.Middleware.Options;
 
 namespace GCStats
 {
     static class Auth
     {
+        private static GraphServiceClient? _graphClient;
+        private static DateTimeOffset _graphCreatedAt;
+        private static readonly TimeSpan _graphMaxAge = TimeSpan.FromHours(23);
+        private static readonly object _graphLock = new object();
+
+
         public static GraphServiceClient GetGraphServiceClient(ILogger log)
+        {
+            if (_graphClient != null)
+                return _graphClient;
+
+            lock (_graphLock)
+            {
+                if (_graphClient == null || DateTimeOffset.UtcNow - _graphCreatedAt >= _graphMaxAge)
+                {
+                    _graphClient = BuildGraphServiceClient(log);
+                    _graphCreatedAt = DateTimeOffset.UtcNow;
+                }
+            }
+
+            return _graphClient;
+        }
+
+        public static GraphServiceClient BuildGraphServiceClient(ILogger log)
         {
             IConfiguration config = new ConfigurationBuilder()
            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -30,11 +54,11 @@ namespace GCStats
             {
                 Retry =
                 {
-                    Delay= TimeSpan.FromSeconds(2),
-                    MaxDelay = TimeSpan.FromSeconds(16),
-                    MaxRetries = 5,
+                    Delay = TimeSpan.FromSeconds(2),
+                    MaxDelay = TimeSpan.FromSeconds(60),
+                    MaxRetries = 8,
                     Mode = RetryMode.Exponential
-                 }
+                }
             };
 
             SecretClient client;
@@ -58,8 +82,36 @@ namespace GCStats
             };
 
             var clientSecretCredential = new ClientSecretCredential(tenantId, clientId, secret.Value, optionsToken);
+            var maxRetries = 10;
 
-            var graphClient = new GraphServiceClient(clientSecretCredential, scopes);
+            var retryOption = new RetryHandlerOption
+            {
+                MaxRetry = maxRetries,
+                ShouldRetry = (delay, attempt, response) =>
+                {
+                    if (response == null)
+                        return false;
+
+                    var shouldRetry = response.StatusCode == System.Net.HttpStatusCode.TooManyRequests ||
+                                    response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable ||
+                                    response.StatusCode == System.Net.HttpStatusCode.GatewayTimeout;
+
+                    if (shouldRetry)
+                        log.LogWarning($"Graph ({response.StatusCode}) - Retrying request (Attempt {attempt + 1} of {maxRetries}). Waiting {delay} seconds...");
+
+                    return shouldRetry;
+                }
+            };
+
+            var handlers = GraphClientFactory.CreateDefaultHandlers().ToList();
+
+            handlers.RemoveAll(h => h is Microsoft.Kiota.Http.HttpClientLibrary.Middleware.RetryHandler);
+            handlers.Add(new Microsoft.Kiota.Http.HttpClientLibrary.Middleware.RetryHandler(retryOption));
+
+            var httpClient = GraphClientFactory.Create(handlers);
+
+            var graphClient = new GraphServiceClient(httpClient, clientSecretCredential, scopes);
+
             return graphClient;
         }
 
