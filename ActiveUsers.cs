@@ -46,19 +46,11 @@ namespace GCStats
         {
             try
             {
-                var workspaceId = Auth.GetAppSetting("workspaceId", _logger, _config);
-                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", _logger, _config);
-                var isLocal = Auth.GetAppSetting("isLocal", _logger, _config, false);
-
                 var snapshotDate = DateTime.UtcNow.Date;
                 var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
+                var blobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, blobName, _logger, _config);
                 var logsQueryClient = await Auth.GetLogsQueryClient(_logger);
-                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-                
-                var containerClient = blobServiceClient.GetBlobContainerClient(Users.ActiveUsersContainerName);
-                await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
-                var blobClient = containerClient.GetBlobClient(blobName);
 
                 string query = @"
                   SigninLogs | where TimeGenerated >= ago(24h)
@@ -71,7 +63,7 @@ namespace GCStats
                 ";
 
                 Response<LogsQueryResult> response = await logsQueryClient.QueryWorkspaceAsync(
-                    workspaceId: workspaceId,
+                    workspaceId: Auth.GetAppSetting("workspaceId", _logger, _config),
                     query: query,
                     timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24))
                 );
@@ -80,13 +72,8 @@ namespace GCStats
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
                 var schema = new ParquetSchema(idField, snapshotDateField);
 
-                var parquetOptions = new ParquetOptions
-                {
-                    CompressionMethod = CompressionMethod.Snappy
-                };
-
                 using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, parquetOptions);
+                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
 
                 var idBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);

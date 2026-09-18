@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using Parquet;
+using System.Text.Json;
 
 namespace GCStats
 {
@@ -6,12 +7,11 @@ namespace GCStats
     {
         public const string TimerStartTime = "0 0 7 * * *"; // 7 AM UTC = 2 AM EST
         public const string BlobDateFormat = "yyyy-MM-dd";
-        public const int RowGroupBatchSize = 50_000;
+        public const int RowGroupBatchSize = 50000;
 
-        public static readonly JsonSerializerOptions JsonOptions = new()
+        public static readonly ParquetOptions ParquetOptions = new ParquetOptions
         {
-            WriteIndented = false,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            CompressionMethod = CompressionMethod.Snappy
         };
     }
 }

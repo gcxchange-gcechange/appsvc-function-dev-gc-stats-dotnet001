@@ -80,34 +80,19 @@ namespace GCStats
                 var ownerSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
                 var memberSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
 
-                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-
-                var communitiesContainerClient = blobServiceClient.GetBlobContainerClient(TotalCommunitiesContainerName);
-                await communitiesContainerClient.CreateIfNotExistsAsync(PublicAccessType.None);
-                var communitiesBlobClient = communitiesContainerClient.GetBlobClient(communitiesBlobName);
-
-                var ownersContainerClient = blobServiceClient.GetBlobContainerClient(CommunityOwnersContainerName);
-                await ownersContainerClient.CreateIfNotExistsAsync(PublicAccessType.None);
-                var ownersBlobClient = ownersContainerClient.GetBlobClient(ownersBlobName);
-
-                var membersContainerClient = blobServiceClient.GetBlobContainerClient(CommunityMembersContainerName);
-                await membersContainerClient.CreateIfNotExistsAsync(PublicAccessType.None);
-                var membersBlobClient = membersContainerClient.GetBlobClient(membersBlobName);
-
-                var parquetOptions = new ParquetOptions
-                {
-                    CompressionMethod = CompressionMethod.Snappy
-                };
+                var communitiesBlobClient = await Auth.GetBlobClient(TotalCommunitiesContainerName, communitiesBlobName, log, config);
+                var ownersBlobClient = await Auth.GetBlobClient(CommunityOwnersContainerName, ownersBlobName, log, config);
+                var membersBlobClient = await Auth.GetBlobClient(CommunityMembersContainerName, membersBlobName, log, config);
 
                 // Open a stream to each of the blobs and create a ParquetWriter for each of them
                 using var communitiesBlobStream = await communitiesBlobClient.OpenWriteAsync(overwrite: true);
-                await using var communitiesWriter = await ParquetWriter.CreateAsync(communitySchema, communitiesBlobStream, parquetOptions);
+                await using var communitiesWriter = await ParquetWriter.CreateAsync(communitySchema, communitiesBlobStream, Globals.ParquetOptions);
 
                 using var ownersBlobStream = await ownersBlobClient.OpenWriteAsync(overwrite: true);
-                await using var ownersWriter = await ParquetWriter.CreateAsync(ownerSchema, ownersBlobStream, parquetOptions);
+                await using var ownersWriter = await ParquetWriter.CreateAsync(ownerSchema, ownersBlobStream, Globals.ParquetOptions);
 
                 using var membersBlobStream = await membersBlobClient.OpenWriteAsync(overwrite: true);
-                await using var membersWriter = await ParquetWriter.CreateAsync(memberSchema, membersBlobStream, parquetOptions);
+                await using var membersWriter = await ParquetWriter.CreateAsync(memberSchema, membersBlobStream, Globals.ParquetOptions);
 
                 int communitiesCount = 0;
                 int ownersCount = 0; 

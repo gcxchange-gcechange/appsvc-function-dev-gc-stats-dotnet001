@@ -1,3 +1,6 @@
+using Azure.Identity;
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
@@ -16,7 +19,7 @@ namespace GCStats
         private readonly ILogger<PageViews> _logger;
         private readonly IConfiguration _config;
 
-        private const string PageViewsContainerName = "page-views";
+        public const string PageViewsContainerName = "page-views";
 
         public PageViews(ILogger<PageViews> logger, IConfiguration config)
         {
@@ -42,8 +45,10 @@ namespace GCStats
                 var snapshotDate = DateTime.UtcNow.Date;
                 var blobName = $"{PageViewsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
-                var blobClient = Auth.GetBlobClient(PageViewsContainerName, blobName, _logger, _config);
                 var graphClient = Auth.GetGraphServiceClient(_logger);
+                var blobClient = await Auth.GetBlobClient(PageViewsContainerName, blobName, _logger, _config);
+
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
 
                 var idField = new DataField<string>("Id");
                 var siteIdField = new DataField<string>("SiteId");
@@ -54,16 +59,11 @@ namespace GCStats
                 var languageField = new DataField<string>("Language");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
-                var parquetOptions = new ParquetOptions
-                {
-                    CompressionMethod = CompressionMethod.Snappy
-                };
-
                 const int PageSize = 500;
                 long runningTotal = 0;
 
                 var endDate = DateTime.UtcNow;
-                var startDate = new DateTime(2021, 1, 1);
+                var startDate = new DateTime(2021, 1, 1); // Starts in 2021 when GCX was officially released
 
                 var monthRanges = new List<(DateTime Start, DateTime End)>();
                 var cursor = new DateTime(startDate.Year, startDate.Month, 1);
