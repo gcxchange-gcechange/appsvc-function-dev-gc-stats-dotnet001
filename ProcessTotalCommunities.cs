@@ -61,7 +61,7 @@ namespace GCStats
                     }
                 );
 
-                using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 await CopyParquetIntoTableAsync(sqlConnection, "dbo.TotalCommunities", communitiesContainerClient, communitiesBlobClient, delegationKey.Value, blobServiceClient.AccountName);
                 _logger.LogInformation("Successfully uploaded communities from {blobName} to dbo.TotalCommunities", blobName);

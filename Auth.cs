@@ -21,10 +21,6 @@ namespace GCStats
         private static DateTimeOffset _logsCreatedAt;
         private static readonly object _logsLock = new object();
 
-        private static Task<SqlConnection>? _sqlConnection;
-        private static DateTimeOffset _sqlCreatedAt;
-        private static readonly object _sqlLock = new object();
-
         private static readonly TimeSpan _maxAge = TimeSpan.FromHours(23);
 
         public static GraphServiceClient GetGraphServiceClient(ILogger log)
@@ -59,23 +55,6 @@ namespace GCStats
             }
 
             return _logsClient;
-        }
-
-        public static Task<SqlConnection> GetSqlConnection(ILogger log, IConfiguration config)
-        {
-            if (_sqlConnection != null)
-                return _sqlConnection;
-
-            lock (_sqlLock)
-            {
-                if (_sqlConnection == null || DateTimeOffset.UtcNow - _sqlCreatedAt >= _maxAge)
-                {
-                    _sqlConnection = BuildSqlConnection(log, config);
-                    _sqlCreatedAt = DateTimeOffset.UtcNow;
-                }
-            }
-
-            return _sqlConnection;
         }
 
         private static GraphServiceClient BuildGraphServiceClient(ILogger log)
@@ -188,7 +167,7 @@ namespace GCStats
             }
         }
 
-        private static async Task<SqlConnection> BuildSqlConnection(ILogger log, IConfiguration config)
+        public static async Task<SqlConnection> BuildSqlConnection(ILogger log, IConfiguration config)
         {
             try
             {

@@ -61,7 +61,7 @@ namespace GCStats
                 var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
                 var sasSecret = sasToken.Replace("'", "''");
 
-                using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 using var copyCmd = new SqlCommand(
                     $"""

@@ -59,11 +59,11 @@ public class ProcessPageViews
             var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
             var sasSecret = sasToken.Replace("'", "''");
 
-            using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+            using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
             using var copyCmd = new SqlCommand(
                 $"""
-                     COPY INTO dbo.PageViews
+                     COPY INTO dbo.SitePage
                      FROM '{blobUrl}'
                      WITH (
                          FILE_TYPE = 'PARQUET',
@@ -76,7 +76,7 @@ public class ProcessPageViews
             copyCmd.CommandTimeout = 0;
             await copyCmd.ExecuteNonQueryAsync();
 
-            _logger.LogInformation("Successfully uploaded items from {blobName} to dbo.PageViews", blobName);
+            _logger.LogInformation("Successfully uploaded items from {blobName} to dbo.SitePage", blobName);
         }
         catch (Exception ex)
         {
