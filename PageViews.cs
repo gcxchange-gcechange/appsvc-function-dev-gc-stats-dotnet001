@@ -316,7 +316,7 @@ namespace GCStats
                             {
                                 var fields = listItem.Fields.AdditionalData;
 
-                                idBuffer.Add(GetField(fields, "UniqueId"));
+                                idBuffer.Add(GetField(fields, "UniqueId").Trim('{', '}'));
                                 siteIdBuffer.Add(GetField(fields, "SiteId"));
                                 webIdBuffer.Add(GetField(fields, "WebId"));
                                 listIdBuffer.Add(GetField(fields, "ListId"));
