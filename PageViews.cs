@@ -26,7 +26,8 @@ namespace GCStats
 
         [Function("PageViews")]
         [QueueOutput("process-page-views", Connection = "AzureWebJobsStorage")]
-        public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
         {
             _logger.LogInformation("PageViews timer trigger executed at: {Time}", DateTime.UtcNow);
 
