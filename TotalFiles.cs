@@ -1,14 +1,11 @@
-using CommunityToolkit.HighPerformance.Buffers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Search.Query;
-using Microsoft.Kiota.Abstractions.Serialization;
 using Parquet;
 using Parquet.Schema;
-using System.Text.Json;
 
 namespace GCStats;
 
@@ -27,8 +24,8 @@ public class TotalFiles
 
     [Function("TotalFiles")]
     [QueueOutput("process-total-files", Connection = "AzureWebJobsStorage")]
-    //public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-    public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+    public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+    //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
     {
         _logger.LogInformation("TotalFiles timer trigger executed at: {Time}", DateTime.UtcNow);
 
@@ -48,6 +45,172 @@ public class TotalFiles
             var blobClient = await Auth.GetBlobClient(FilesContainerName, blobName, _logger, _config);
 
             using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+
+            var idField = new DataField<string>("Id");
+            var siteIdField = new DataField<string>("SiteId");
+            var webIdField = new DataField<string>("WebId");
+            var listIdField = new DataField<string>("ListId");
+            var listItemIdField = new DataField<int>("ListItemId");
+
+            var pathField = new DataField<string>("Path");
+            var fileNameField = new DataField<string>("FileName");
+            var fileExtensionField = new DataField<string>("FileExtension");
+            var titleField = new DataField<string>("Title");
+            var spWebUrlField = new DataField<string>("SPWebUrl");
+            var spSiteUrlField = new DataField<string>("SPSiteUrl");
+            var siteTitleField = new DataField<string>("SiteTitle");
+            var promotedStateField = new DataField<int>("PromotedState");
+
+            var createdField = new DataField<DateTime>("Created");
+            var lastModifiedTimeField = new DataField<DateTime>("LastModifiedTime");
+            var authorField = new DataField<string>("Author");
+            var editorField = new DataField<string>("EditorOWSUSER");
+            var languageField = new DataField<string>("SPTranslationLanguage");
+
+            var viewsLifeTimeField = new DataField<int>("ViewsLifeTime");
+            var viewsLifeTimeUniqueField = new DataField<int>("ViewsLifeTimeUniqueUsers");
+
+            var viewsLast1DaysField = new DataField<int>("ViewsLast1Days");
+            var viewsLast2DaysField = new DataField<int>("ViewsLast2Days");
+            var viewsLast3DaysField = new DataField<int>("ViewsLast3Days");
+            var viewsLast4DaysField = new DataField<int>("ViewsLast4Days");
+            var viewsLast5DaysField = new DataField<int>("ViewsLast5Days");
+            var viewsLast6DaysField = new DataField<int>("ViewsLast6Days");
+            var viewsLast7DaysField = new DataField<int>("ViewsLast7Days");
+
+            var viewsLastMonths1Field = new DataField<int>("ViewsLastMonths1");
+            var viewsLastMonths2Field = new DataField<int>("ViewsLastMonths2");
+            var viewsLastMonths3Field = new DataField<int>("ViewsLastMonths3");
+
+            var snapshotDateField = new DataField<DateTime>("SnapshotDate");
+
+            var schema = new ParquetSchema(idField, siteIdField, webIdField, listIdField, listItemIdField, pathField, fileNameField, fileExtensionField, titleField, 
+                spWebUrlField, spSiteUrlField, siteTitleField, promotedStateField, createdField, lastModifiedTimeField, authorField, editorField, languageField, 
+                viewsLifeTimeField, viewsLifeTimeUniqueField, viewsLast1DaysField, viewsLast2DaysField, viewsLast3DaysField, viewsLast4DaysField, viewsLast5DaysField, 
+                viewsLast6DaysField,viewsLast7DaysField, viewsLastMonths1Field, viewsLastMonths2Field, viewsLastMonths3Field, snapshotDateField);
+
+            await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
+
+            var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var siteIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var webIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var listIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var listItemIdBuffer = new List<int>(Globals.RowGroupBatchSize);
+
+            var pathBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var fileNameBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var fileExtensionBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var titleBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var spWebUrlBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var spSiteUrlBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var siteTitleBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var promotedStateBuffer = new List<int>(Globals.RowGroupBatchSize);
+
+            var createdBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+            var lastModifiedTimeBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+            var authorBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var editorBuffer = new List<string>(Globals.RowGroupBatchSize);
+            var languageBuffer = new List<string>(Globals.RowGroupBatchSize);
+
+            var viewsLifeTimeBuffer = new List<int>(Globals.RowGroupBatchSize);
+            var viewsLifeTimeUniqueUsersBuffer = new List<int>(Globals.RowGroupBatchSize);
+
+            var viewsLast1DaysBuffer = new List<int>(Globals.RowGroupBatchSize);
+            var viewsLast2DaysBuffer = new List<int>(Globals.RowGroupBatchSize);
+            var viewsLast3DaysBuffer = new List<int>(Globals.RowGroupBatchSize);
+            var viewsLast4DaysBuffer = new List<int>(Globals.RowGroupBatchSize);
+            var viewsLast5DaysBuffer = new List<int>(Globals.RowGroupBatchSize);
+            var viewsLast6DaysBuffer = new List<int>(Globals.RowGroupBatchSize);
+            var viewsLast7DaysBuffer = new List<int>(Globals.RowGroupBatchSize);
+
+            var ViewsLastMonths1Buffer = new List<int>(Globals.RowGroupBatchSize);
+            var ViewsLastMonths2Buffer = new List<int>(Globals.RowGroupBatchSize);
+            var ViewsLastMonths3Buffer = new List<int>(Globals.RowGroupBatchSize);
+
+            var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+
+            async Task FlushBatchAsync()
+            {
+                if (idBuffer.Count == 0)
+                    return;
+
+                using var groupWriter = parquetWriter.CreateRowGroup();
+
+                await groupWriter.WriteAsync(idField, idBuffer);
+                await groupWriter.WriteAsync(siteIdField, siteIdBuffer);
+                await groupWriter.WriteAsync(webIdField, webIdBuffer);
+                await groupWriter.WriteAsync(listIdField, listIdBuffer);
+                await groupWriter.WriteAsync<int>(listItemIdField, listItemIdBuffer.ToArray().AsMemory());
+
+                await groupWriter.WriteAsync(pathField, pathBuffer);
+                await groupWriter.WriteAsync(fileNameField, fileNameBuffer);
+                await groupWriter.WriteAsync(fileExtensionField, fileExtensionBuffer);
+                await groupWriter.WriteAsync(titleField, titleBuffer);
+                await groupWriter.WriteAsync(spWebUrlField, spWebUrlBuffer);
+                await groupWriter.WriteAsync(spSiteUrlField, spSiteUrlBuffer);
+                await groupWriter.WriteAsync(siteTitleField, siteTitleBuffer);
+                await groupWriter.WriteAsync<int>(promotedStateField, promotedStateBuffer.ToArray().AsMemory());
+
+                await groupWriter.WriteAsync<DateTime>(createdField, createdBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<DateTime>(lastModifiedTimeField, lastModifiedTimeBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync(authorField, authorBuffer);
+                await groupWriter.WriteAsync(editorField, editorBuffer);
+                await groupWriter.WriteAsync(languageField, languageBuffer);
+
+                await groupWriter.WriteAsync<int>(viewsLifeTimeField, viewsLifeTimeBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLifeTimeUniqueField, viewsLifeTimeUniqueUsersBuffer.ToArray().AsMemory());
+
+                await groupWriter.WriteAsync<int>(viewsLast1DaysField, viewsLast1DaysBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLast2DaysField, viewsLast2DaysBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLast3DaysField, viewsLast3DaysBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLast4DaysField, viewsLast4DaysBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLast5DaysField, viewsLast5DaysBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLast6DaysField, viewsLast6DaysBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLast7DaysField, viewsLast7DaysBuffer.ToArray().AsMemory());
+
+                await groupWriter.WriteAsync<int>(viewsLastMonths1Field, ViewsLastMonths1Buffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLastMonths2Field, ViewsLastMonths2Buffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLastMonths3Field, ViewsLastMonths3Buffer.ToArray().AsMemory());
+
+                await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+
+                idBuffer.Clear();
+                siteIdBuffer.Clear();
+                webIdBuffer.Clear();
+                listIdBuffer.Clear();
+                listItemIdBuffer.Clear();
+
+                pathBuffer.Clear();
+                fileNameBuffer.Clear();
+                titleBuffer.Clear();
+                spWebUrlBuffer.Clear();
+                spSiteUrlBuffer.Clear();
+                siteTitleBuffer.Clear();
+                promotedStateBuffer.Clear();
+
+                createdBuffer.Clear();
+                lastModifiedTimeBuffer.Clear();
+                authorBuffer.Clear();
+                editorBuffer.Clear();
+                languageBuffer.Clear();
+
+                viewsLifeTimeBuffer.Clear();
+                viewsLifeTimeUniqueUsersBuffer.Clear();
+
+                viewsLast1DaysBuffer.Clear();
+                viewsLast2DaysBuffer.Clear();
+                viewsLast3DaysBuffer.Clear();
+                viewsLast4DaysBuffer.Clear();
+                viewsLast5DaysBuffer.Clear();
+                viewsLast6DaysBuffer.Clear();
+                viewsLast7DaysBuffer.Clear();
+
+                ViewsLastMonths1Buffer.Clear();
+                ViewsLastMonths2Buffer.Clear();
+                ViewsLastMonths3Buffer.Clear();
+
+                snapshotDateBuffer.Clear();
+            }
 
             const int PageSize = 500;
             long runningTotal = 0;
@@ -155,8 +318,48 @@ public class TotalFiles
                         {
                             var fields = listItem.Fields.AdditionalData;
 
-                            foreach (var field in fields)
-                                _logger.LogInformation($"{field.Key.ToString()}: {field.Value.ToString()}");
+                            idBuffer.Add(Globals.GetField(fields, "UniqueId").Trim('{', '}'));
+                            siteIdBuffer.Add(Globals.GetField(fields, "SiteId"));
+                            webIdBuffer.Add(Globals.GetField(fields, "WebId"));
+                            listIdBuffer.Add(Globals.GetField(fields, "ListId"));
+                            listItemIdBuffer.Add(int.Parse(Globals.GetField(fields, "ListItemId")));
+
+                            pathBuffer.Add(Globals.GetField(fields, "Path"));
+                            fileNameBuffer.Add(Globals.GetField(fields, "FileName"));
+                            fileExtensionBuffer.Add(Globals.GetField(fields, "FileExtension"));
+                            titleBuffer.Add(Globals.GetField(fields, "Title"));
+                            spWebUrlBuffer.Add(Globals.GetField(fields, "SPWebUrl"));
+                            spSiteUrlBuffer.Add(Globals.GetField(fields, "SPSiteUrl"));
+                            siteTitleBuffer.Add(Globals.GetField(fields, "SiteTitle"));
+                            promotedStateBuffer.Add(int.Parse(Globals.GetField(fields, "PromotedState") ?? "-1"));
+
+                            createdBuffer.Add(DateTime.Parse(Globals.GetField(fields, "Created")));
+                            lastModifiedTimeBuffer.Add(DateTime.Parse(Globals.GetField(fields, "LastModifiedTime")));
+                            authorBuffer.Add(Globals.GetField(fields, "Author"));
+                            editorBuffer.Add(Globals.GetField(fields, "EditorOWSUSER"));
+                            languageBuffer.Add(Globals.GetField(fields, "SPTranslationLanguage") ?? "en");
+
+                            viewsLifeTimeBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLifeTime") ?? "0"));
+                            viewsLifeTimeUniqueUsersBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLifeTimeUniqueUsers") ?? "0"));
+
+                            viewsLast1DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast1Days") ?? "0"));
+                            viewsLast2DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast2Days") ?? "0"));
+                            viewsLast3DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast3Days") ?? "0"));
+                            viewsLast4DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast4Days") ?? "0"));
+                            viewsLast5DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast5Days") ?? "0"));
+                            viewsLast6DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast6Days") ?? "0"));
+                            viewsLast7DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast7Days") ?? "0"));
+
+                            ViewsLastMonths1Buffer.Add(int.Parse(Globals.GetField(fields, "ViewsLastMonths1") ?? "0"));
+                            ViewsLastMonths2Buffer.Add(int.Parse(Globals.GetField(fields, "ViewsLastMonths2") ?? "0"));
+                            ViewsLastMonths3Buffer.Add(int.Parse(Globals.GetField(fields, "ViewsLastMonths3") ?? "0"));
+
+                            snapshotDateBuffer.Add(snapshotDate);
+
+                            if (idBuffer.Count >= Globals.RowGroupBatchSize)
+                            {
+                                FlushBatchAsync().GetAwaiter().GetResult();
+                            }
                         }
                     }
 
@@ -167,6 +370,11 @@ public class TotalFiles
 
                 _logger.LogInformation($"Found {total} files for {monthStart:yyyy-MM}");
             }
+
+            _logger.LogInformation($"Processed {runningTotal} total files");
+
+            await FlushBatchAsync();
+            await parquetWriter.DisposeAsync();
 
             return blobName;
         }

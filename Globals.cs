@@ -1,4 +1,5 @@
-﻿using Parquet;
+﻿using Microsoft.Kiota.Abstractions.Serialization;
+using Parquet;
 using System.Text.Json;
 
 namespace GCStats
@@ -13,5 +14,23 @@ namespace GCStats
         {
             CompressionMethod = CompressionMethod.Snappy
         };
+
+        public static string GetField(IDictionary<string, object> fields, string name)
+        {
+            if (fields is null) return null;
+
+            // key casing varies, so match case-insensitively
+            var key = fields.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
+            if (key is null) return null;
+
+            return fields[key] switch
+            {
+                UntypedString s => s.GetValue(),
+                UntypedInteger i => i.GetValue().ToString(),
+                UntypedLong l => l.GetValue().ToString(),
+                JsonElement je => je.ToString(),
+                var v => v?.ToString()
+            };
+        }
     }
 }
