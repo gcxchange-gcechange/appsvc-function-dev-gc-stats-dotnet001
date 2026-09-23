@@ -61,10 +61,15 @@ namespace GCStats
 
                 // TotalCommunities Fields
                 var idField = new DataField<string>("Id");
+                var siteIdField = new DataField<string>("SiteId");
                 var displayNameField = new DataField<string>("DisplayName");
+                var webUrlField = new DataField<string>("WebUrl");
                 var sensitivityLabelIdField = new DataField<string>("SensitivityLabelId");
                 var creationDateField = new DataField<DateTime>("CreationDate");
                 var lastActivityDateField = new DataField<DateTime>("LastActivityDate");
+                var ownerCountField = new DataField<int>("OwnerCount");
+                var memberCountField = new DataField<int>("MemberCount");
+                var visibilityField = new DataField<string>("Visibility");
 
                 // Community Owner/Member Fields
                 var communityIdField = new DataField<string>("CommunityId");
@@ -73,7 +78,9 @@ namespace GCStats
                 // Shared Fields
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
-                var communitySchema = new ParquetSchema(idField, displayNameField, sensitivityLabelIdField, creationDateField, lastActivityDateField, snapshotDateField);
+                var communitySchema = new ParquetSchema(idField, siteIdField, displayNameField, webUrlField, sensitivityLabelIdField, 
+                    creationDateField, lastActivityDateField, ownerCountField, memberCountField, visibilityField, snapshotDateField);
+
                 var ownerSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
                 var memberSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
 
@@ -97,10 +104,15 @@ namespace GCStats
 
                 // Create the buffers and batch writes for communities, owners, and members
                 var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var siteIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var displayNameBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var webUrlBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var sensitivityLabelIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var creationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
                 var lastActivityDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                var ownerCountBuffer = new List<int>(Globals.RowGroupBatchSize);
+                var memberCountBuffer = new List<int>(Globals.RowGroupBatchSize);
+                var visibilityBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var communitySnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
                 async Task FlushCommunitiesBatchAsync()
@@ -110,17 +122,27 @@ namespace GCStats
 
                     using var groupWriter = communitiesWriter.CreateRowGroup();
                     await groupWriter.WriteAsync(idField, idBuffer);
+                    await groupWriter.WriteAsync(siteIdField, siteIdBuffer);
                     await groupWriter.WriteAsync(displayNameField, displayNameBuffer);
+                    await groupWriter.WriteAsync(webUrlField, webUrlBuffer);
                     await groupWriter.WriteAsync(sensitivityLabelIdField, sensitivityLabelIdBuffer);
                     await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<DateTime>(lastActivityDateField, lastActivityDateBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(ownerCountField, ownerCountBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(memberCountField, memberCountBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync(visibilityField, visibilityBuffer);
                     await groupWriter.WriteAsync<DateTime>(snapshotDateField, communitySnapshotDateBuffer.ToArray().AsMemory());
 
                     idBuffer.Clear();
+                    siteIdBuffer.Clear();
                     displayNameBuffer.Clear();
+                    webUrlBuffer.Clear();
                     sensitivityLabelIdBuffer.Clear();
                     creationDateBuffer.Clear();
                     lastActivityDateBuffer.Clear();
+                    ownerCountBuffer.Clear();
+                    memberCountBuffer.Clear();
+                    visibilityBuffer.Clear();
                     communitySnapshotDateBuffer.Clear();
                 }
 
@@ -167,7 +189,7 @@ namespace GCStats
                 {
                     requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
                     requestConfiguration.QueryParameters.Top = 999;
-                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "assignedLabels", "resourceProvisioningOptions"];
+                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "assignedLabels", "resourceProvisioningOptions", "visibility"];
                     requestConfiguration.QueryParameters.Filter = "resourceProvisioningOptions/Any(x:x eq 'Team')";
                 });
 
@@ -200,10 +222,15 @@ namespace GCStats
 
                                 // Add the data to be written to the Parquet files
                                 idBuffer.Add(group.Id);
+                                siteIdBuffer.Add(site?.Id ?? string.Empty);
                                 displayNameBuffer.Add(group.DisplayName ?? string.Empty);
+                                webUrlBuffer.Add(site?.WebUrl ?? string.Empty);
                                 sensitivityLabelIdBuffer.Add(group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty);
                                 creationDateBuffer.Add((group.CreatedDateTime ?? DateTimeOffset.MinValue).UtcDateTime);
                                 lastActivityDateBuffer.Add(lastActivityDate);
+                                ownerCountBuffer.Add(owners.Length);
+                                memberCountBuffer.Add(members.Length);
+                                visibilityBuffer.Add(group.Visibility ?? string.Empty);
                                 communitySnapshotDateBuffer.Add(snapshotDate);
 
                                 foreach (var owner in owners)
