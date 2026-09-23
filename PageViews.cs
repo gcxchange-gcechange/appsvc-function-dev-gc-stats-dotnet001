@@ -316,40 +316,40 @@ namespace GCStats
                             {
                                 var fields = listItem.Fields.AdditionalData;
 
-                                idBuffer.Add(GetField(fields, "UniqueId").Trim('{', '}'));
-                                siteIdBuffer.Add(GetField(fields, "SiteId"));
-                                webIdBuffer.Add(GetField(fields, "WebId"));
-                                listIdBuffer.Add(GetField(fields, "ListId"));
-                                listItemIdBuffer.Add(int.Parse(GetField(fields, "ListItemId")));
+                                idBuffer.Add(Globals.GetField(fields, "UniqueId").Trim('{', '}'));
+                                siteIdBuffer.Add(Globals.GetField(fields, "SiteId"));
+                                webIdBuffer.Add(Globals.GetField(fields, "WebId"));
+                                listIdBuffer.Add(Globals.GetField(fields, "ListId"));
+                                listItemIdBuffer.Add(int.Parse(Globals.GetField(fields, "ListItemId")));
                                 
-                                pathBuffer.Add(GetField(fields, "Path"));
-                                fileNameBuffer.Add(GetField(fields, "FileName"));
-                                titleBuffer.Add(GetField(fields, "Title"));
-                                spWebUrlBuffer.Add(GetField(fields, "SPWebUrl"));
-                                spSiteUrlBuffer.Add(GetField(fields, "SPSiteUrl"));
-                                siteTitleBuffer.Add(GetField(fields, "SiteTitle"));
-                                promotedStateBuffer.Add(int.Parse(GetField(fields, "PromotedState") ?? "-1"));
+                                pathBuffer.Add(Globals.GetField(fields, "Path"));
+                                fileNameBuffer.Add(Globals.GetField(fields, "FileName"));
+                                titleBuffer.Add(Globals.GetField(fields, "Title"));
+                                spWebUrlBuffer.Add(Globals.GetField(fields, "SPWebUrl"));
+                                spSiteUrlBuffer.Add(Globals.GetField(fields, "SPSiteUrl"));
+                                siteTitleBuffer.Add(Globals.GetField(fields, "SiteTitle"));
+                                promotedStateBuffer.Add(int.Parse(Globals.GetField(fields, "PromotedState") ?? "-1"));
 
-                                createdBuffer.Add(DateTime.Parse(GetField(fields, "Created")));
-                                lastModifiedTimeBuffer.Add(DateTime.Parse(GetField(fields, "LastModifiedTime")));
-                                authorBuffer.Add(GetField(fields, "Author"));
-                                editorBuffer.Add(GetField(fields, "EditorOWSUSER"));
-                                languageBuffer.Add(GetField(fields, "SPTranslationLanguage") ?? "en");
+                                createdBuffer.Add(DateTime.Parse(Globals.GetField(fields, "Created")));
+                                lastModifiedTimeBuffer.Add(DateTime.Parse(Globals.GetField(fields, "LastModifiedTime")));
+                                authorBuffer.Add(Globals.GetField(fields, "Author"));
+                                editorBuffer.Add(Globals.GetField(fields, "EditorOWSUSER"));
+                                languageBuffer.Add(Globals.GetField(fields, "SPTranslationLanguage") ?? "en");
 
-                                viewsLifeTimeBuffer.Add(int.Parse(GetField(fields, "ViewsLifeTime") ?? "0"));
-                                viewsLifeTimeUniqueUsersBuffer.Add(int.Parse(GetField(fields, "ViewsLifeTimeUniqueUsers") ?? "0"));
+                                viewsLifeTimeBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLifeTime") ?? "0"));
+                                viewsLifeTimeUniqueUsersBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLifeTimeUniqueUsers") ?? "0"));
 
-                                viewsLast1DaysBuffer.Add(int.Parse(GetField(fields, "ViewsLast1Days") ?? "0"));
-                                viewsLast2DaysBuffer.Add(int.Parse(GetField(fields, "ViewsLast2Days") ?? "0"));
-                                viewsLast3DaysBuffer.Add(int.Parse(GetField(fields, "ViewsLast3Days") ?? "0"));
-                                viewsLast4DaysBuffer.Add(int.Parse(GetField(fields, "ViewsLast4Days") ?? "0"));
-                                viewsLast5DaysBuffer.Add(int.Parse(GetField(fields, "ViewsLast5Days") ?? "0"));
-                                viewsLast6DaysBuffer.Add(int.Parse(GetField(fields, "ViewsLast6Days") ?? "0"));
-                                viewsLast7DaysBuffer.Add(int.Parse(GetField(fields, "ViewsLast7Days") ?? "0"));
+                                viewsLast1DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast1Days") ?? "0"));
+                                viewsLast2DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast2Days") ?? "0"));
+                                viewsLast3DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast3Days") ?? "0"));
+                                viewsLast4DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast4Days") ?? "0"));
+                                viewsLast5DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast5Days") ?? "0"));
+                                viewsLast6DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast6Days") ?? "0"));
+                                viewsLast7DaysBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLast7Days") ?? "0"));
 
-                                ViewsLastMonths1Buffer.Add(int.Parse(GetField(fields, "ViewsLastMonths1") ?? "0"));
-                                ViewsLastMonths2Buffer.Add(int.Parse(GetField(fields, "ViewsLastMonths2") ?? "0"));
-                                ViewsLastMonths3Buffer.Add(int.Parse(GetField(fields, "ViewsLastMonths3") ?? "0"));
+                                ViewsLastMonths1Buffer.Add(int.Parse(Globals.GetField(fields, "ViewsLastMonths1") ?? "0"));
+                                ViewsLastMonths2Buffer.Add(int.Parse(Globals.GetField(fields, "ViewsLastMonths2") ?? "0"));
+                                ViewsLastMonths3Buffer.Add(int.Parse(Globals.GetField(fields, "ViewsLastMonths3") ?? "0"));
 
                                 snapshotDateBuffer.Add(snapshotDate);
 
@@ -380,24 +380,6 @@ namespace GCStats
                 _logger.LogError(ex.Message);
                 throw;
             }
-        }
-
-        private string GetField(IDictionary<string, object> fields, string name)
-        {
-            if (fields is null) return null;
-
-            // key casing varies, so match case-insensitively
-            var key = fields.Keys.FirstOrDefault(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase));
-            if (key is null) return null;
-
-            return fields[key] switch
-            {
-                UntypedString s => s.GetValue(),
-                UntypedInteger i => i.GetValue().ToString(),
-                UntypedLong l => l.GetValue().ToString(),
-                JsonElement je => je.ToString(),
-                var v => v?.ToString()
-            };
         }
     }
 }
