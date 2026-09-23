@@ -26,8 +26,8 @@ namespace GCStats
 
             try
             {
-                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", _logger, _config);
-                var isLocal = Globals.GetAppSetting("isLocal", _logger, _config, false);
+                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", _logger, _config);
+                var isLocal = Auth.GetAppSetting("isLocal", _logger, _config, false);
                 var credential = isLocal == "true" ? new AzureCliCredential() : (Azure.Core.TokenCredential)new DefaultAzureCredential();
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), credential);
@@ -59,7 +59,7 @@ namespace GCStats
                 var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
                 var sasSecret = sasToken.Replace("'", "''");
 
-                using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 using var copyCmd = new SqlCommand(
                     $"""

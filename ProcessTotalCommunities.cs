@@ -27,8 +27,8 @@ namespace GCStats
 
             try
             {
-                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", _logger, _config);
-                var isLocal = Globals.GetAppSetting("isLocal", _logger, _config, false);
+                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", _logger, _config);
+                var isLocal = Auth.GetAppSetting("isLocal", _logger, _config, false);
                 var credential = isLocal == "true" ? new AzureCliCredential() : (Azure.Core.TokenCredential)new DefaultAzureCredential();
 
                 var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), credential);
@@ -61,7 +61,7 @@ namespace GCStats
                     }
                 );
 
-                using var sqlConnection = await Auth.GetSqlConnection(_logger, _config);
+                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 await CopyParquetIntoTableAsync(sqlConnection, "dbo.TotalCommunities", communitiesContainerClient, communitiesBlobClient, delegationKey.Value, blobServiceClient.AccountName);
                 _logger.LogInformation("Successfully uploaded communities from {blobName} to dbo.TotalCommunities", blobName);

@@ -1,7 +1,4 @@
-﻿using Azure.Identity;
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
@@ -23,33 +20,20 @@ namespace GCStats
         {
             try
             {
-                var storageAccountUrl = Globals.GetAppSetting("storageAccountUrl", log, config);
-                var exceptionUsersArray = Globals.GetAppSetting("exceptionUsersArray", log, config);
-                var isLocal = Globals.GetAppSetting("isLocal", log, config, false);
-
                 var snapshotDate = DateTime.UtcNow.Date;
                 var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+                var blobClient = await Auth.GetBlobClient(TotalUsersContainerName, blobName, log, config);
 
-                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential());
-                var containerClient = blobServiceClient.GetBlobContainerClient(TotalUsersContainerName);
-                await containerClient.CreateIfNotExistsAsync(PublicAccessType.None);
-                var blobClient = containerClient.GetBlobClient(blobName);
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
 
                 var idField = new DataField<string>("Id");
                 var mailField = new DataField<string>("Mail");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
                 var schema = new ParquetSchema(idField, mailField, snapshotDateField);
 
-                var parquetOptions = new ParquetOptions
-                {
-                    CompressionMethod = CompressionMethod.Snappy
-                };
+                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, parquetOptions);
-
-                var graph = Auth.GraphAuth(log);
+                var graph = Auth.GetGraphServiceClient(log);
                 int count = 0;
 
                 var idBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -78,6 +62,8 @@ namespace GCStats
                     requestConfiguration.QueryParameters.Top = 999;
                     requestConfiguration.QueryParameters.Select = Users.UserQuerySelectParams;
                 });
+
+                var exceptionUsersArray = Auth.GetAppSetting("exceptionUsersArray", log, config);
 
                 var pageIterator = PageIterator<User, UserCollectionResponse>
                     .CreatePageIterator(
