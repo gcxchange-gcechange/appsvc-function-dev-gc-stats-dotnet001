@@ -59,13 +59,11 @@ public class TotalFiles
             var spWebUrlField = new DataField<string>("SPWebUrl");
             var spSiteUrlField = new DataField<string>("SPSiteUrl");
             var siteTitleField = new DataField<string>("SiteTitle");
-            var promotedStateField = new DataField<int>("PromotedState");
 
             var createdField = new DataField<DateTime>("Created");
             var lastModifiedTimeField = new DataField<DateTime>("LastModifiedTime");
             var authorField = new DataField<string>("Author");
             var editorField = new DataField<string>("EditorOWSUSER");
-            var languageField = new DataField<string>("SPTranslationLanguage");
 
             var viewsLifeTimeField = new DataField<int>("ViewsLifeTime");
             var viewsLifeTimeUniqueField = new DataField<int>("ViewsLifeTimeUniqueUsers");
@@ -85,8 +83,8 @@ public class TotalFiles
             var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
             var schema = new ParquetSchema(idField, siteIdField, webIdField, listIdField, listItemIdField, pathField, fileNameField, fileExtensionField, titleField, 
-                spWebUrlField, spSiteUrlField, siteTitleField, promotedStateField, createdField, lastModifiedTimeField, authorField, editorField, languageField, 
-                viewsLifeTimeField, viewsLifeTimeUniqueField, viewsLast1DaysField, viewsLast2DaysField, viewsLast3DaysField, viewsLast4DaysField, viewsLast5DaysField, 
+                spWebUrlField, spSiteUrlField, siteTitleField, createdField, lastModifiedTimeField, authorField, editorField, viewsLifeTimeField, 
+                viewsLifeTimeUniqueField, viewsLast1DaysField, viewsLast2DaysField, viewsLast3DaysField, viewsLast4DaysField, viewsLast5DaysField, 
                 viewsLast6DaysField,viewsLast7DaysField, viewsLastMonths1Field, viewsLastMonths2Field, viewsLastMonths3Field, snapshotDateField);
 
             await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
@@ -104,13 +102,11 @@ public class TotalFiles
             var spWebUrlBuffer = new List<string>(Globals.RowGroupBatchSize);
             var spSiteUrlBuffer = new List<string>(Globals.RowGroupBatchSize);
             var siteTitleBuffer = new List<string>(Globals.RowGroupBatchSize);
-            var promotedStateBuffer = new List<int>(Globals.RowGroupBatchSize);
 
             var createdBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
             var lastModifiedTimeBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
             var authorBuffer = new List<string>(Globals.RowGroupBatchSize);
             var editorBuffer = new List<string>(Globals.RowGroupBatchSize);
-            var languageBuffer = new List<string>(Globals.RowGroupBatchSize);
 
             var viewsLifeTimeBuffer = new List<int>(Globals.RowGroupBatchSize);
             var viewsLifeTimeUniqueUsersBuffer = new List<int>(Globals.RowGroupBatchSize);
@@ -149,13 +145,11 @@ public class TotalFiles
                 await groupWriter.WriteAsync(spWebUrlField, spWebUrlBuffer);
                 await groupWriter.WriteAsync(spSiteUrlField, spSiteUrlBuffer);
                 await groupWriter.WriteAsync(siteTitleField, siteTitleBuffer);
-                await groupWriter.WriteAsync<int>(promotedStateField, promotedStateBuffer.ToArray().AsMemory());
 
                 await groupWriter.WriteAsync<DateTime>(createdField, createdBuffer.ToArray().AsMemory());
                 await groupWriter.WriteAsync<DateTime>(lastModifiedTimeField, lastModifiedTimeBuffer.ToArray().AsMemory());
                 await groupWriter.WriteAsync(authorField, authorBuffer);
                 await groupWriter.WriteAsync(editorField, editorBuffer);
-                await groupWriter.WriteAsync(languageField, languageBuffer);
 
                 await groupWriter.WriteAsync<int>(viewsLifeTimeField, viewsLifeTimeBuffer.ToArray().AsMemory());
                 await groupWriter.WriteAsync<int>(viewsLifeTimeUniqueField, viewsLifeTimeUniqueUsersBuffer.ToArray().AsMemory());
@@ -186,13 +180,11 @@ public class TotalFiles
                 spWebUrlBuffer.Clear();
                 spSiteUrlBuffer.Clear();
                 siteTitleBuffer.Clear();
-                promotedStateBuffer.Clear();
 
                 createdBuffer.Clear();
                 lastModifiedTimeBuffer.Clear();
                 authorBuffer.Clear();
                 editorBuffer.Clear();
-                languageBuffer.Clear();
 
                 viewsLifeTimeBuffer.Clear();
                 viewsLifeTimeUniqueUsersBuffer.Clear();
@@ -269,12 +261,10 @@ public class TotalFiles
                                         "SPWebUrl",
                                         "SPSiteUrl",
                                         "SiteTitle",
-                                        "PromotedState",
                                         "Created",
                                         "LastModifiedTime",
                                         "Author",
                                         "EditorOWSUSER",
-                                        "SPTranslationLanguage",
                                         "ViewsLifeTime",
                                         "ViewsLifeTimeUniqueUsers",
                                         "ViewsLast1Days",
@@ -331,13 +321,11 @@ public class TotalFiles
                             spWebUrlBuffer.Add(Globals.GetField(fields, "SPWebUrl"));
                             spSiteUrlBuffer.Add(Globals.GetField(fields, "SPSiteUrl"));
                             siteTitleBuffer.Add(Globals.GetField(fields, "SiteTitle"));
-                            promotedStateBuffer.Add(int.Parse(Globals.GetField(fields, "PromotedState") ?? "-1"));
 
                             createdBuffer.Add(DateTime.Parse(Globals.GetField(fields, "Created")));
                             lastModifiedTimeBuffer.Add(DateTime.Parse(Globals.GetField(fields, "LastModifiedTime")));
                             authorBuffer.Add(Globals.GetField(fields, "Author"));
                             editorBuffer.Add(Globals.GetField(fields, "EditorOWSUSER"));
-                            languageBuffer.Add(Globals.GetField(fields, "SPTranslationLanguage") ?? "en");
 
                             viewsLifeTimeBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLifeTime") ?? "0"));
                             viewsLifeTimeUniqueUsersBuffer.Add(int.Parse(Globals.GetField(fields, "ViewsLifeTimeUniqueUsers") ?? "0"));
