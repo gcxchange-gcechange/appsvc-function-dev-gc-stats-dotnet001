@@ -67,6 +67,9 @@ namespace GCStats
                 var sensitivityLabelIdField = new DataField<string>("SensitivityLabelId");
                 var creationDateField = new DataField<DateTime>("CreationDate");
                 var lastActivityDateField = new DataField<DateTime>("LastActivityDate");
+                var lastActivityDateSharePointField = new DataField<DateTime?>("LastActivityDateSharePoint");
+                var lastActivityDateTeamsField = new DataField<DateTime?>("LastActivityDateTeams");
+                var lastActivityDateMembershipChangeField = new DataField<DateTime?>("LastActivityDateMembershipChange");
                 var ownerCountField = new DataField<int>("OwnerCount");
                 var memberCountField = new DataField<int>("MemberCount");
                 var visibilityField = new DataField<string>("Visibility");
@@ -79,7 +82,8 @@ namespace GCStats
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
                 var communitySchema = new ParquetSchema(idField, siteIdField, displayNameField, webUrlField, sensitivityLabelIdField, 
-                    creationDateField, lastActivityDateField, ownerCountField, memberCountField, visibilityField, snapshotDateField);
+                    creationDateField, lastActivityDateField, lastActivityDateSharePointField, lastActivityDateTeamsField, 
+                    lastActivityDateMembershipChangeField, ownerCountField, memberCountField, visibilityField, snapshotDateField);
 
                 var ownerSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
                 var memberSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
@@ -110,6 +114,9 @@ namespace GCStats
                 var sensitivityLabelIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var creationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
                 var lastActivityDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                var lastActivityDateSharePointBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
+                var lastActivityDateTeamsBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
+                var lastActivityDateMembershipChangeBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
                 var ownerCountBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var memberCountBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var visibilityBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -128,6 +135,9 @@ namespace GCStats
                     await groupWriter.WriteAsync(sensitivityLabelIdField, sensitivityLabelIdBuffer);
                     await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<DateTime>(lastActivityDateField, lastActivityDateBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(lastActivityDateSharePointField, lastActivityDateSharePointBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(lastActivityDateTeamsField, lastActivityDateTeamsBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(lastActivityDateMembershipChangeField, lastActivityDateMembershipChangeBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<int>(ownerCountField, ownerCountBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<int>(memberCountField, memberCountBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(visibilityField, visibilityBuffer);
@@ -140,6 +150,9 @@ namespace GCStats
                     sensitivityLabelIdBuffer.Clear();
                     creationDateBuffer.Clear();
                     lastActivityDateBuffer.Clear();
+                    lastActivityDateSharePointBuffer.Clear();
+                    lastActivityDateTeamsBuffer.Clear();
+                    lastActivityDateMembershipChangeBuffer.Clear();
                     ownerCountBuffer.Clear();
                     memberCountBuffer.Clear();
                     visibilityBuffer.Clear();
@@ -209,16 +222,40 @@ namespace GCStats
 
                                 // Check reports for last activity data
                                 var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id, StringComparison.OrdinalIgnoreCase));
-                                var sharePointUsageRecord = site != null && site.Id != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(site.Id, StringComparison.OrdinalIgnoreCase)) : new SharePointUsageRecord();
+
+                                var siteIdGuid = site?.Id?.Split(',').ElementAtOrDefault(1);
+                                var sharePointUsageRecord = siteIdGuid != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(siteIdGuid, StringComparison.OrdinalIgnoreCase)) : new SharePointUsageRecord();
+
+                                DateTime? lastActivitySP = null;
+                                DateTime? lastActivityTeams = null;
+                                DateTime? lastActivityMembership = null;
 
                                 if (teamsActivityRecord != null && teamsActivityRecord.LastActivityDate != null)
+                                {
                                     lastActivityDate = (DateTime)teamsActivityRecord.LastActivityDate;
+                                    lastActivityTeams = lastActivityDate;
+                                }
+                                else lastActivityTeams = null;
+                                    
 
                                 if (sharePointUsageRecord != null && sharePointUsageRecord.LastActivityDate != null)
-                                    lastActivityDate = lastActivityDate > (DateTime)sharePointUsageRecord.LastActivityDate ? lastActivityDate : (DateTime)sharePointUsageRecord.LastActivityDate;
+                                {
+                                    lastActivitySP = (DateTime)sharePointUsageRecord.LastActivityDate;
+
+                                    if (lastActivitySP > lastActivityDate)
+                                        lastActivityDate = (DateTime)lastActivitySP;
+                                }
+                                else lastActivitySP = null;
+                                    
 
                                 if (membershipChangeDates.TryGetValue(group.Id, out var membershipChangeDate))
-                                    lastActivityDate = lastActivityDate > membershipChangeDate ? lastActivityDate : membershipChangeDate;
+                                {
+                                    lastActivityMembership = membershipChangeDate;
+
+                                    if (membershipChangeDate > lastActivityDate)
+                                        lastActivityDate = membershipChangeDate;
+                                }
+                                else lastActivityMembership = null;
 
                                 // Add the data to be written to the Parquet files
                                 idBuffer.Add(group.Id);
@@ -228,6 +265,9 @@ namespace GCStats
                                 sensitivityLabelIdBuffer.Add(group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty);
                                 creationDateBuffer.Add((group.CreatedDateTime ?? DateTimeOffset.MinValue).UtcDateTime);
                                 lastActivityDateBuffer.Add(lastActivityDate);
+                                lastActivityDateSharePointBuffer.Add(lastActivitySP);
+                                lastActivityDateTeamsBuffer.Add(lastActivityTeams);
+                                lastActivityDateMembershipChangeBuffer.Add(lastActivityMembership ?? null);
                                 ownerCountBuffer.Add(owners.Length);
                                 memberCountBuffer.Add(members.Length);
                                 visibilityBuffer.Add(group.Visibility ?? string.Empty);
@@ -290,9 +330,8 @@ namespace GCStats
             {
                 log.LogError("StreamCommunitiesToBlobAsync failed.");
                 log.LogError(ex.Message.ToString());
+                throw;
             }
-
-            return string.Empty;
         }
 
         private static async Task<(UserRecord[] Owners, UserRecord[] Members)> GetOwnersAndMembersAsync(GraphServiceClient graph, string groupId, ILogger log)
@@ -384,8 +423,6 @@ namespace GCStats
                         auditsPage!,
                         audit =>
                         {
-                            log.LogInformation("Activity: {Activity}, Date: {Date}", audit.ActivityDisplayName, audit.ActivityDateTime);
-
                             if (targetedActivity.Contains(audit.ActivityDisplayName) && audit.ActivityDateTime.HasValue)
                             {
                                 // The group itself is one of the TargetResources (type "Group")
