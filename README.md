@@ -5,7 +5,7 @@ This application saves various tenant metrics to Azure blob storage, then transf
 ![dotnet 10](https://img.shields.io/badge/net10.0-blue.svg)
 ## API permissions
 | API / Permissions name | Type | Reason
-| - | - |
+| - | - | - |
 | AuditLog.Read.All | Application | Determine user & group activity
 | Group.Read.All | Application | Read group information
 | Reports.Read.All | Application | Read SharePoint and Teams reports
