@@ -235,7 +235,6 @@ namespace GCStats
                                     lastActivityDate = (DateTime)teamsActivityRecord.LastActivityDate;
                                     lastActivityTeams = lastActivityDate;
                                 }
-                                else lastActivityTeams = null;
                                     
 
                                 if (sharePointUsageRecord != null && sharePointUsageRecord.LastActivityDate != null)
@@ -245,7 +244,6 @@ namespace GCStats
                                     if (lastActivitySP > lastActivityDate)
                                         lastActivityDate = (DateTime)lastActivitySP;
                                 }
-                                else lastActivitySP = null;
                                     
 
                                 if (membershipChangeDates.TryGetValue(group.Id, out var membershipChangeDate))
@@ -255,7 +253,6 @@ namespace GCStats
                                     if (membershipChangeDate > lastActivityDate)
                                         lastActivityDate = membershipChangeDate;
                                 }
-                                else lastActivityMembership = null;
 
                                 // Add the data to be written to the Parquet files
                                 idBuffer.Add(group.Id);
