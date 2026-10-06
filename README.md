@@ -27,4 +27,6 @@ In order for the application to run you will need the following settings in your
 | workspaceId | The workspace Id for log analytics
 | exceptionUsersArray | A comma separated string of user Ids that will be ignored for all user related metrics
 | exceptionGroupsArray | A comma separated string of group Ids that will be ignored for all group related metrics 
+| cmSiteId | The siteId of Career Marketplace 
+| cmListId | The listId of the JobOpportunity list in the Career Marketplace
 | isLocal | Optional. Should be set to `true` if you want to use `AzureCliCredential` for authentication. (use `az login` before running locally)
