@@ -246,9 +246,24 @@ namespace GCStats
                 }
 
                 var siteId = Auth.GetAppSetting("cmSiteId", _logger, _config);
-                var listId = Auth.GetAppSetting("cmJobOpportunityListId", _logger, _config);
+                var listIdJobOpp = Auth.GetAppSetting("cmJobOpportunityListId", _logger, _config);
 
-                var jobOpportunityPage = await graphClient.Sites[siteId].Lists[listId].Items.GetAsync(rc =>
+                // Cache all the lookup lists
+                var departments = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmDepartmentListId", _logger, _config));
+                var classificationCodes = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmClassificationCodeListId", _logger, _config));
+                var classificationLevels = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmClassificationLevelListId", _logger, _config));
+                var durations = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmDurationListId", _logger, _config));
+                var workSchedules = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmWorkScheduleListId", _logger, _config));
+                var securityClearances = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSecurityClearanceListId", _logger, _config));
+                var languageRequirements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmLanguageRequirementListId", _logger, _config));
+                var workArrangements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmWorkArrangementListId", _logger, _config));
+                var cities = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmCityListId", _logger, _config));
+                var regions = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmRegionListId", _logger, _config));
+                var provinces = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmProvinceListId", _logger, _config));
+                var skills = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSkillsListId", _logger, _config));
+                // TODO: Cache the term sets (ProgramArea and jobType)
+
+                var jobOpportunityPage = await graphClient.Sites[siteId].Lists[listIdJobOpp].Items.GetAsync(rc =>
                 {
                     rc.QueryParameters.Expand = new[] { "fields" };
                 });
@@ -313,6 +328,51 @@ namespace GCStats
                 _logger.LogError(ex.Message);
                 throw;
             }
+        }
+
+        private async Task<Dictionary<string, string?>> LoadLookupValuesAsync(GraphServiceClient graphClient, string siteId, string listId)
+        {
+            var values = new Dictionary<string, string?>();
+
+            var response = await graphClient.Sites[siteId].Lists[listId].Items.GetAsync(rc =>
+            {
+                rc.QueryParameters.Expand = new[] { "fields" };
+            });
+
+            if (response == null)
+                return values;
+
+            var pageIterator = PageIterator<ListItem, ListItemCollectionResponse>
+                .CreatePageIterator(
+                    graphClient,
+                    response,
+                    item =>
+                    {
+                        var fields = item.Fields?.AdditionalData;
+
+                        if (item.Id != null && fields != null)
+                        {
+                            string? value = null;
+
+                            // Look for NameEn or TitleEn
+                            foreach (var field in fields)
+                            {
+                                if (field.Key.Equals("NameEn",StringComparison.OrdinalIgnoreCase) || field.Key.Equals("TitleEn",StringComparison.OrdinalIgnoreCase))
+                                {
+                                    value = field.Value?.ToString();
+                                    break;
+                                }
+                            }
+
+                            values[item.Id] = value;
+                        }
+
+                        return true;
+                    });
+
+            await pageIterator.IterateAsync();
+
+            return values;
         }
     }
 }
