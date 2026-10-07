@@ -281,26 +281,61 @@ namespace GCStats
                             {
                                 idBuffer.Add(jobOpportunity.Id);
                                 authorMailBuffer.Add(Globals.GetField(fields, "ContactEmail"));
-                                departmentIdBuffer.Add(Globals.GetField(fields, "DepartmentLookupId"));
+
+                                var departmentId = Globals.GetField(fields, "DepartmentLookupId");
+                                departmentIdBuffer.Add(departmentId);
+                                departmentBuffer.Add(departments[departmentId]);
+
                                 titleEnBuffer.Add(Globals.GetField(fields, "JobTitleEn"));
                                 titleFrBuffer.Add(Globals.GetField(fields, "JobTitleFr"));
-                                classCodeIdBuffer.Add(Globals.GetField(fields, "ClassificationCodeLookupId"));
-                                classLevelIdBuffer.Add(Globals.GetField(fields, "ClassificationLevelLookupId"));
+
+                                var classCodeId = Globals.GetField(fields, "ClassificationCodeLookupId");
+                                classCodeIdBuffer.Add(classCodeId);
+                                classCodeBuffer.Add(classificationCodes[classCodeId]);
+
+                                var classLevelId = Globals.GetField(fields, "ClassificationLevelLookupId");
+                                classLevelIdBuffer.Add(classLevelId);
+                                classLevelBuffer.Add(classificationLevels[classLevelId]);
+
                                 numOpportunitiesBuffer.Add(Convert.ToInt32(Convert.ToDouble(Globals.GetField(fields, "NumberOfOpportunities"))));
-                                durationIdBuffer.Add(Globals.GetFieldOrNull(fields, "DurationLookupId"));
+
+                                var durationId = Globals.GetFieldOrNull(fields, "DurationLookupId");
+                                durationIdBuffer.Add(durationId);
+                                durationBuffer.Add(durationId != null ? durations[durationId] : null);
+
                                 durationQuantityBuffer.Add(Convert.ToDouble(Globals.GetField(fields, "DurationQuantity")));
                                 creationDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "Created")));
                                 modificationDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "Modified")));
                                 applicationDeadlineDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "ApplicationDeadlineDate")));
                                 jobDescriptionEnBuffer.Add(Globals.GetField(fields, "JobDescriptionEn"));
                                 jobDescriptionFrBuffer.Add(Globals.GetField(fields, "JobDescriptionFr"));
-                                workscheduleIdBuffer.Add(Globals.GetField(fields, "WorkScheduleLookupId"));
-                                securityClearanceIdBuffer.Add(Globals.GetField(fields, "SecurityClearanceLookupId"));
+
+                                var workScheduleId = Globals.GetField(fields, "WorkScheduleLookupId");
+                                workscheduleIdBuffer.Add(workScheduleId);
+                                workscheduleBuffer.Add(workSchedules[workScheduleId]);
+
+                                var securityClearanceId = Globals.GetField(fields, "SecurityClearanceLookupId");
+                                securityClearanceIdBuffer.Add(securityClearanceId);
+                                securityClearanceBuffer.Add(securityClearances[securityClearanceId]);
+
                                 languageComprehensionBuffer.Add(Globals.GetField(fields, "LanguageComprehension"));
-                                languageRequirementIdBuffer.Add(Globals.GetField(fields, "LanguageRequirementLookupId"));
-                                workArrangementIdBuffer.Add(Globals.GetField(fields, "WorkArrangementLookupId"));
+
+                                var languageRequirementId = Globals.GetField(fields, "LanguageRequirementLookupId");
+                                languageRequirementIdBuffer.Add(languageRequirementId);
+                                languageRequirementBuffer.Add(languageRequirements[languageRequirementId]);
+
+                                var workArrangementId = Globals.GetField(fields, "WorkArrangementLookupId");
+                                workArrangementIdBuffer.Add(workArrangementId);
+                                workArrangementBuffer.Add(workArrangements[workArrangementId]);
+
                                 approvedStaffindBuffer.Add(Convert.ToBoolean(Globals.GetField(fields, "ApprovedStaffing")));
-                                cityIdBuffer.Add(Globals.GetField(fields, "CityLookupId"));
+
+                                var cityId = Globals.GetField(fields, "CityLookupId");
+                                cityIdBuffer.Add(cityId);
+                                cityBuffer.Add(cities[cityId]);
+
+                                // TODO: Region / Province
+
                                 //programAreaIdBuffer.Add(); // This is a term
                                 snapshotDateBuffer.Add(snapshotDate);
 
