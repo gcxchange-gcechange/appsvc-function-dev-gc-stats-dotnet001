@@ -32,5 +32,11 @@ namespace GCStats
                 var v => v?.ToString()
             };
         }
+
+        public static string? GetFieldOrNull(IDictionary<string, object> fields, string name)
+        {
+            var value = GetField(fields, name);
+            return value == "0" ? null : value;
+        }
     }
 }

@@ -28,5 +28,18 @@ In order for the application to run you will need the following settings in your
 | exceptionUsersArray | A comma separated string of user Ids that will be ignored for all user related metrics
 | exceptionGroupsArray | A comma separated string of group Ids that will be ignored for all group related metrics 
 | cmSiteId | The siteId of Career Marketplace 
-| cmListId | The listId of the JobOpportunity list in the Career Marketplace
+| cmJobOpportunityListId | The listId of the JobOpportunity list in the Career Marketplace
+| cmDepatmentListId | The listId of the Department list in the Career Marketplace
+| cmClassifictionCodeListId | The listId of the ClassificationCode list in the Career Marketplace
+| cmClassificationLevelListId | The listId of the ClassificationLevel list in the Career Marketplace
+| cmDurationListId | The listId of the Duration list in the Career Marketplace
+| cmWorkScheduleListId | The listId of the WorkSchedule list in the Career Marketplace
+| cmSecurityClearanceListId | The listId of the SecurityClearance list in the Career Marketplace
+| cmLanguageRequirementListId | The listId of the LanguageRequirement list in the Career Marketplace
+| cmWorkArrangementListId | The listId of the WorkArrangement list in the Career Marketplace
+| cmCityListId | The listId of the City list in the Career Marketplace
+| cmRegionListId | The listId of the Region list in the Career Marketplace
+| cmSkillsListId | The listId of the Skills list in the Career Marketplace
+| cmJobTypeTermSetId | The term set ID for JobType (found in the SP term store)
+| cmProgramAreaTermSetId | Ther term set ID for ProgramArea (found in the SP term store)
 | isLocal | Optional. Should be set to `true` if you want to use `AzureCliCredential` for authentication. (use `az login` before running locally)
