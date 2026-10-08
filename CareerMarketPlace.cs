@@ -57,33 +57,12 @@ namespace GCStats
                 using var blobStreamSkills = await blobClientSkills.OpenWriteAsync(overwrite: true);
                 using var blobStreamJobType = await blobClientJobType.OpenWriteAsync(overwrite: true);
 
-                // TODO: 1. Capture total live job postings daily (save all columns)
-                //       2. Capture views for each post daily
-                //       3. Capture number of apply clicks total for all jobs
-                //       4. Capture number of apply clicks per job
-                //       5. Capture top 100 skills daily
-                //       6. Capture average lifespan of opportunity
-
-                // Parquet files
-                //       1. JobOpportunities (1, 2, 3 + 4, 5, 6)
-
-                //       2. JobOpportunitySkills
-                //          JobOpportunityId
-                //          SkillId
-                //          Title
-
-                //       3. JobOpportunityJobTypes
-                //          JobOpportunityId
-                //          JobTypeId
-                //          Title
-
                 // JobOpportunity fields
                 var idField = new DataField<string>("Id");
                 var authorMailField = new DataField<string>("AuthorMail");
                 var departmentIdField = new DataField<string>("DepartmentId");
                 var departmentField = new DataField<string>("Department");
                 var titleEnField = new DataField<string>("JobTitleEn");
-                var titleFrField = new DataField<string>("JobTitleFr");
                 var classCodeIdField = new DataField<string>("ClassificationCodeId");
                 var classCodeField = new DataField<string>("ClassificationCode");
                 var classLevelIdField = new DataField<string>("ClassificationLevelId");
@@ -95,8 +74,6 @@ namespace GCStats
                 var creationDateField = new DataField<DateTime>("CreationDate");
                 var modificationDateField = new DataField<DateTime>("ModificationDate");
                 var applicationDeadlineDateField = new DataField<DateTime>("ApplicationDeadlineDate");
-                var jobDescriptionEnField = new DataField<string>("JobDescriptionEn");
-                var jobDescriptionFrField = new DataField<string>("JobDescriptionFr");
                 var workscheduleIdField = new DataField<string>("WorkScheduleId");
                 var workscheduleField = new DataField<string>("WorkSchedule");
                 var securityClearanceIdField = new DataField<string>("SecurityClearanceId");
@@ -123,11 +100,11 @@ namespace GCStats
                 var jobTypeIdField = new DataField<string>("JobTypeId");
                 var titleField = new DataField<string>("Title");
 
-                // TODO: Update schema
-                var schemaJobOpp = new ParquetSchema(idField, authorMailField, departmentIdField, titleEnField, titleFrField, classCodeIdField, classLevelIdField, numOpportunitiesField,
-                    durationIdField, durationQuantityField, creationDateField, modificationDateField, applicationDeadlineDateField, jobDescriptionEnField, jobDescriptionFrField,
-                    workscheduleIdField, securityClearanceIdField, languageComprehensionField, languageRequirementIdField, workArrangementIdField, approvedStaffindField,
-                    cityIdField, /*programAreaIdField,*/ snapshotDateField);
+                var schemaJobOpp = new ParquetSchema(idField, authorMailField, departmentIdField, departmentField, titleEnField, classCodeIdField, classCodeField, classLevelIdField,
+                    classLevelField, numOpportunitiesField, durationIdField, durationField, durationQuantityField, creationDateField, modificationDateField, applicationDeadlineDateField,
+                    workscheduleIdField, workscheduleField, securityClearanceIdField, securityClearanceField, languageComprehensionField, languageRequirementIdField, languageRequirementField,
+                    workArrangementIdField, workArrangementField, approvedStaffindField, cityIdField, cityField, regionIdField, regionField, provinceIdField, provinceField, programAreaIdField,
+                    programAreaField, snapshotDateField);
                 await using var parquetWriterJobOpp = await ParquetWriter.CreateAsync(schemaJobOpp, blobStreamJobOpp, Globals.ParquetOptions);
 
                 var schemaSkills = new ParquetSchema(jobOpportunityIdField, skillIdField, titleField, snapshotDateField);
@@ -142,7 +119,6 @@ namespace GCStats
                 var departmentIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var departmentBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var titleEnBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var titleFrBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var classCodeIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var classCodeBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var classLevelIdBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -154,8 +130,6 @@ namespace GCStats
                 var creationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
                 var modificationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
                 var applicationDeadlineDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-                var jobDescriptionEnBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var jobDescriptionFrBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var workscheduleIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var workscheduleBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var securityClearanceIdBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -188,7 +162,6 @@ namespace GCStats
                     await groupWriter.WriteAsync(departmentIdField, departmentIdBuffer);
                     await groupWriter.WriteAsync(departmentField, departmentBuffer);
                     await groupWriter.WriteAsync(titleEnField, titleEnBuffer);
-                    await groupWriter.WriteAsync(titleFrField, titleFrBuffer);
                     await groupWriter.WriteAsync(classCodeIdField, classCodeIdBuffer);
                     await groupWriter.WriteAsync(classCodeField, classCodeBuffer);
                     await groupWriter.WriteAsync(classLevelIdField, classLevelIdBuffer);
@@ -200,8 +173,6 @@ namespace GCStats
                     await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<DateTime>(modificationDateField, modificationDateBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<DateTime>(applicationDeadlineDateField, applicationDeadlineDateBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync(jobDescriptionEnField, jobDescriptionEnBuffer);
-                    await groupWriter.WriteAsync(jobDescriptionFrField, jobDescriptionFrBuffer);
                     await groupWriter.WriteAsync(workscheduleIdField, workscheduleIdBuffer);
                     await groupWriter.WriteAsync(workscheduleField, workscheduleBuffer);
                     await groupWriter.WriteAsync(securityClearanceIdField, securityClearanceIdBuffer);
@@ -227,7 +198,6 @@ namespace GCStats
                     departmentIdBuffer.Clear();
                     departmentBuffer.Clear();
                     titleEnBuffer.Clear();
-                    titleFrBuffer.Clear();
                     classCodeIdBuffer.Clear();
                     classCodeBuffer.Clear();
                     classLevelIdBuffer.Clear();
@@ -239,8 +209,6 @@ namespace GCStats
                     creationDateBuffer.Clear();
                     modificationDateBuffer.Clear();
                     applicationDeadlineDateBuffer.Clear();
-                    jobDescriptionEnBuffer.Clear();
-                    jobDescriptionFrBuffer.Clear();
                     workscheduleIdBuffer.Clear();
                     workscheduleBuffer.Clear();
                     securityClearanceIdBuffer.Clear();
@@ -348,7 +316,6 @@ namespace GCStats
                     "ContactEmail",
                     "DepartmentLookupId",
                     "JobTitleEn",
-                    "JobTitleFr",
                     "ClassificationCodeLookupId",
                     "ClassificationLevelLookupId",
                     "NumberOfOpportunities",
@@ -357,8 +324,6 @@ namespace GCStats
                     "Created",
                     "Modified",
                     "ApplicationDeadlineDate",
-                    "JobDescriptionEn",
-                    "JobDescriptionFr",
                     "WorkScheduleLookupId",
                     "SecurityClearanceLookupId",
                     "LanguageComprehension",
@@ -399,7 +364,6 @@ namespace GCStats
                                 departmentBuffer.Add(departments.Where(item => item.Id == departmentId).FirstOrDefault()?.Title!);
 
                                 titleEnBuffer.Add(Globals.GetField(fields, "JobTitleEn"));
-                                titleFrBuffer.Add(Globals.GetField(fields, "JobTitleFr"));
 
                                 var classCodeId = Globals.GetField(fields, "ClassificationCodeLookupId");
                                 classCodeIdBuffer.Add(classCodeId);
@@ -419,8 +383,6 @@ namespace GCStats
                                 creationDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "Created")));
                                 modificationDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "Modified")));
                                 applicationDeadlineDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "ApplicationDeadlineDate")));
-                                jobDescriptionEnBuffer.Add(Globals.GetField(fields, "JobDescriptionEn"));
-                                jobDescriptionFrBuffer.Add(Globals.GetField(fields, "JobDescriptionFr"));
 
                                 var workScheduleId = Globals.GetField(fields, "WorkScheduleLookupId");
                                 workscheduleIdBuffer.Add(workScheduleId);
@@ -444,15 +406,15 @@ namespace GCStats
 
                                 var cityId = Globals.GetFieldOrNull(fields, "CityLookupId");
                                 cityIdBuffer.Add(cityId);
-                                cityBuffer.Add(cityId != null ? cities.Where(item => item.Id == cityId).FirstOrDefault()?.Title! : null);
+                                cityBuffer.Add(cityId != null ? cities.Where(item => item.Id == cityId).FirstOrDefault()?.Title : null);
 
                                 var regionId = cityId != null ? cities.Where(city => city.Id == cityId).FirstOrDefault()?.ParentId : null;
                                 regionIdBuffer.Add(regionId);
-                                regionBuffer.Add(regionId != null ? regions.Where(item => item.Id == regionId).FirstOrDefault()?.Title! : null);
+                                regionBuffer.Add(regionId != null ? regions.Where(item => item.Id == regionId).FirstOrDefault()?.Title : null);
 
                                 var provinceId = regionId != null ? regions.Where(region => region.Id == regionId).FirstOrDefault()?.ParentId : null;
-                                provinceIdBuffer.Add(cityId != null ? "" : null);
-                                provinceBuffer.Add(cityId != null ? provinces.Where(item => item.Id == cityId).FirstOrDefault()?.Title! : null);
+                                provinceIdBuffer.Add(provinceId);
+                                provinceBuffer.Add(provinceId != null ? provinces.Where(item => item.Id == cityId).FirstOrDefault()?.Title : null);
 
                                 var contactEmail = Globals.GetField(fields, "ContactEmail");
                                 var jobTitle = Globals.GetField(fields, "JobTitleEn");
