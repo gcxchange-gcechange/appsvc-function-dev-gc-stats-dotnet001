@@ -414,7 +414,7 @@ namespace GCStats
 
                                 var provinceId = regionId != null ? regions.Where(region => region.Id == regionId).FirstOrDefault()?.ParentId : null;
                                 provinceIdBuffer.Add(provinceId);
-                                provinceBuffer.Add(provinceId != null ? provinces.Where(item => item.Id == cityId).FirstOrDefault()?.Title : null);
+                                provinceBuffer.Add(provinceId != null ? provinces.Where(item => item.Id == provinceId).FirstOrDefault()?.Title : null);
 
                                 var contactEmail = Globals.GetField(fields, "ContactEmail");
                                 var jobTitle = Globals.GetField(fields, "JobTitleEn");
