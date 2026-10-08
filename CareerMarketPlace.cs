@@ -19,6 +19,8 @@ namespace GCStats
         public const string JobOpportunitySkillsContainerName = "job-opportunity-skills";
         public const string JobOpportunityJobTypesContainerName = "job-opportunity-job-types";
 
+        private record LookupValue(string Id, string? Title, string? ParentId);
+
         public JobOpportunities(ILogger<JobOpportunities> logger, IConfiguration config)
         {
             _logger = logger;
@@ -322,9 +324,9 @@ namespace GCStats
                 var securityClearances = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSecurityClearanceListId", _logger, _config));
                 var languageRequirements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmLanguageRequirementListId", _logger, _config));
                 var workArrangements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmWorkArrangementListId", _logger, _config));
-                var cities = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmCityListId", _logger, _config));
-                var regions = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmRegionListId", _logger, _config));
-                var provinces = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmProvinceListId", _logger, _config));
+                var cities = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmCityListId", _logger, _config), new[] { "NameEn", "TitleEn", "RegionLookupId" } );
+                var regions = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmRegionListId", _logger, _config), new[] { "NameEn", "TitleEn", "ProvinceLookupId" });
+                var provinces = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmProvinceListId", _logger, _config), new[] { "NameEn", "TitleEn" });
                 var skills = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSkillsListId", _logger, _config));
 
                 // Cache the term sets
@@ -332,12 +334,48 @@ namespace GCStats
                 var programAreas = await LoadTermSetValuesAsync(graphClient, "root", Auth.GetAppSetting("cmProgramAreaTermSetId", _logger, _config));
 
                 // Get all the job opportunities
+                //var jobOpportunityPage = await graphClient.Sites[siteId].Lists[listIdJobOpp].Items.GetAsync(rc =>
+                //{
+                //    // TODO: Specifcy every field
+                //    rc.QueryParameters.Expand = new[] 
+                //    { 
+                //        "fields" 
+                //    };
+                //});
+
+                var selectColumns = new[]
+                {
+                    "ContactEmail",
+                    "DepartmentLookupId",
+                    "JobTitleEn",
+                    "JobTitleFr",
+                    "ClassificationCodeLookupId",
+                    "ClassificationLevelLookupId",
+                    "NumberOfOpportunities",
+                    "DurationLookupId",          // was misspelled "DuratiopnLookupId"
+                    "DurationQuantity",
+                    "Created",
+                    "Modified",
+                    "ApplicationDeadlineDate",
+                    "JobDescriptionEn",
+                    "JobDescriptionFr",
+                    "WorkScheduleLookupId",
+                    "SecurityClearanceLookupId",
+                    "LanguageComprehension",
+                    "LanguageRequirementLookupId",
+                    "WorkArrangementLookupId",
+                    "ApprovedStaffing",
+                    "CityLookupId",
+                    "Skills",            // multi-value lookup IDs
+                    "JobType",
+                    "JobType_0",
+                    "ProgramArea",
+                    "ProgramArea_0"
+                };
+
                 var jobOpportunityPage = await graphClient.Sites[siteId].Lists[listIdJobOpp].Items.GetAsync(rc =>
                 {
-                    rc.QueryParameters.Expand = new[] 
-                    { 
-                        "fields" 
-                    };
+                    rc.QueryParameters.Expand = new[] { $"fields($select={string.Join(",", selectColumns)})" };
                 });
 
                 var countJobOpp = 0;
@@ -358,24 +396,24 @@ namespace GCStats
 
                                 var departmentId = Globals.GetField(fields, "DepartmentLookupId");
                                 departmentIdBuffer.Add(departmentId);
-                                departmentBuffer.Add(departments[departmentId]!);
+                                departmentBuffer.Add(departments.Where(item => item.Id == departmentId).FirstOrDefault()?.Title!);
 
                                 titleEnBuffer.Add(Globals.GetField(fields, "JobTitleEn"));
                                 titleFrBuffer.Add(Globals.GetField(fields, "JobTitleFr"));
 
                                 var classCodeId = Globals.GetField(fields, "ClassificationCodeLookupId");
                                 classCodeIdBuffer.Add(classCodeId);
-                                classCodeBuffer.Add(classificationCodes[classCodeId]!);
+                                classCodeBuffer.Add(classificationCodes.Where(item => item.Id == classCodeId).FirstOrDefault()?.Title!);
 
                                 var classLevelId = Globals.GetField(fields, "ClassificationLevelLookupId");
                                 classLevelIdBuffer.Add(classLevelId);
-                                classLevelBuffer.Add(classificationLevels[classLevelId]!);
+                                classLevelBuffer.Add(classificationLevels.Where(item => item.Id == classLevelId).FirstOrDefault()?.Title!);
 
                                 numOpportunitiesBuffer.Add(Convert.ToInt32(Convert.ToDouble(Globals.GetField(fields, "NumberOfOpportunities"))));
 
                                 var durationId = Globals.GetFieldOrNull(fields, "DurationLookupId");
                                 durationIdBuffer.Add(durationId);
-                                durationBuffer.Add(durationId != null ? durations[durationId] : null);
+                                durationBuffer.Add(durationId != null ? durations.Where(item => item.Id == durationId).FirstOrDefault()?.Title! : null);
 
                                 durationQuantityBuffer.Add(Convert.ToDouble(Globals.GetField(fields, "DurationQuantity")));
                                 creationDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "Created")));
@@ -386,29 +424,35 @@ namespace GCStats
 
                                 var workScheduleId = Globals.GetField(fields, "WorkScheduleLookupId");
                                 workscheduleIdBuffer.Add(workScheduleId);
-                                workscheduleBuffer.Add(workSchedules[workScheduleId]!);
+                                workscheduleBuffer.Add(workSchedules.Where(item => item.Id == workScheduleId).FirstOrDefault()?.Title!);
 
                                 var securityClearanceId = Globals.GetField(fields, "SecurityClearanceLookupId");
                                 securityClearanceIdBuffer.Add(securityClearanceId);
-                                securityClearanceBuffer.Add(securityClearances[securityClearanceId]!);
+                                securityClearanceBuffer.Add(securityClearances.Where(item => item.Id == securityClearanceId).FirstOrDefault()?.Title!);
 
                                 languageComprehensionBuffer.Add(Globals.GetField(fields, "LanguageComprehension"));
 
                                 var languageRequirementId = Globals.GetField(fields, "LanguageRequirementLookupId");
                                 languageRequirementIdBuffer.Add(languageRequirementId);
-                                languageRequirementBuffer.Add(languageRequirements[languageRequirementId]!);
+                                languageRequirementBuffer.Add(languageRequirements.Where(item => item.Id == languageRequirementId).FirstOrDefault()?.Title!);
 
                                 var workArrangementId = Globals.GetField(fields, "WorkArrangementLookupId");
                                 workArrangementIdBuffer.Add(workArrangementId);
-                                workArrangementBuffer.Add(workArrangements[workArrangementId]!);
+                                workArrangementBuffer.Add(workArrangements.Where(item => item.Id == workArrangementId).FirstOrDefault()?.Title!);
 
                                 approvedStaffindBuffer.Add(Convert.ToBoolean(Globals.GetField(fields, "ApprovedStaffing")));
 
                                 var cityId = Globals.GetFieldOrNull(fields, "CityLookupId");
                                 cityIdBuffer.Add(cityId);
-                                cityBuffer.Add(cityId != null ? cities[cityId] : null);
+                                cityBuffer.Add(cityId != null ? cities.Where(item => item.Id == cityId).FirstOrDefault()?.Title! : null);
 
-                                // TODO: Region / Province
+                                var regionId = cityId != null ? cities.Where(city => city.Id == cityId).FirstOrDefault()?.ParentId : null;
+                                regionIdBuffer.Add(regionId);
+                                regionBuffer.Add(regionId != null ? regions.Where(item => item.Id == regionId).FirstOrDefault()?.Title! : null);
+
+                                var provinceId = regionId != null ? regions.Where(region => region.Id == regionId).FirstOrDefault()?.ParentId : null;
+                                provinceIdBuffer.Add(cityId != null ? "" : null);
+                                provinceBuffer.Add(cityId != null ? provinces.Where(item => item.Id == cityId).FirstOrDefault()?.Title! : null);
 
                                 var contactEmail = Globals.GetField(fields, "ContactEmail");
                                 var jobTitle = Globals.GetField(fields, "JobTitleEn");
@@ -416,7 +460,6 @@ namespace GCStats
                                 var programAreaId = Globals.GetFieldOrNull(fields, "ProgramAreaId");
                                 programAreaIdBuffer.Add(programAreaId);
                                 programAreaBuffer.Add(programAreaId != null ? programAreas[programAreaId] : null);
-                                
 
                                 snapshotDateBuffer.Add(snapshotDate);
 
@@ -454,13 +497,13 @@ namespace GCStats
             }
         }
 
-        private async Task<Dictionary<string, string?>> LoadLookupValuesAsync(GraphServiceClient graphClient, string siteId, string listId)
+        private async Task<List<LookupValue>> LoadLookupValuesAsync(GraphServiceClient graphClient, string siteId, string listId, string[]? selectColumns = null)
         {
-            var values = new Dictionary<string, string?>();
+            var values = new List<LookupValue>();
 
             var response = await graphClient.Sites[siteId].Lists[listId].Items.GetAsync(rc =>
             {
-                rc.QueryParameters.Expand = new[] { "fields" };
+                rc.QueryParameters.Expand = selectColumns is null || selectColumns.Length == 0 ? ["fields"] : [$"fields($select={string.Join(",", selectColumns)})"];
             });
 
             if (response == null)
@@ -476,19 +519,25 @@ namespace GCStats
 
                         if (item.Id != null && fields != null)
                         {
-                            string? value = null;
+                            string? title = null;
+                            string? parentId = null;
 
-                            // Look for NameEn or TitleEn
                             foreach (var field in fields)
                             {
+                                if (title != null && parentId != null)
+                                    break;
+
                                 if (field.Key.Equals("NameEn", StringComparison.OrdinalIgnoreCase) || field.Key.Equals("TitleEn", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    value = field.Value?.ToString();
-                                    break;
+                                    title = field.Value?.ToString();
+                                }
+                                else if (field.Key.Equals("RegionLookupId", StringComparison.OrdinalIgnoreCase) || field.Key.Equals("ProvinceLookupId", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    parentId = field.Value?.ToString();
                                 }
                             }
 
-                            values[item.Id] = value;
+                            values.Add(new LookupValue(item.Id, title, parentId));
                         }
 
                         return true;
