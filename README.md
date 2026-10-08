@@ -11,6 +11,7 @@ This application saves various tenant metrics to Azure blob storage, then transf
 | Reports.Read.All | Application | Read SharePoint and Teams reports
 | User.Read.All | Application | Collection of user data
 | Sites.Read.All | Application | Collect metrics for site pages/files
+| TermStore.Read.all | Application | Read terms related to Career Marketplace 
 
 ## Application Settings
 In order for the application to run you will need the following settings in your  `environment variables` of the deployed function app, or in the `local.settings.json` file in your local project.
