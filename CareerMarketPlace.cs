@@ -5,8 +5,10 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.TermStore;
+using Microsoft.Kiota.Abstractions.Serialization;
 using Parquet;
 using Parquet.Schema;
+using System.Globalization;
 
 namespace GCStats
 {
@@ -111,7 +113,7 @@ namespace GCStats
                 await using var parquetWriterSkills = await ParquetWriter.CreateAsync(schemaSkills, blobStreamSkills, Globals.ParquetOptions);
 
                 var schemaJobType = new ParquetSchema(jobOpportunityIdField, jobTypeIdField, titleField, snapshotDateField);
-                await using var parquetWriterJobType= await ParquetWriter.CreateAsync(schemaJobType, blobStreamJobType, Globals.ParquetOptions);
+                await using var parquetWriterJobType = await ParquetWriter.CreateAsync(schemaJobType, blobStreamJobType, Globals.ParquetOptions);
 
                 // JobOpportunity buffers
                 var idBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -298,19 +300,9 @@ namespace GCStats
                 var skills = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSkillsListId", _logger, _config));
 
                 // Cache the term sets
-                var jobTypes = await LoadTermSetValuesAsync(graphClient, "root", Auth.GetAppSetting("cmJobTypeTermSetId", _logger, _config));
                 var programAreas = await LoadTermSetValuesAsync(graphClient, "root", Auth.GetAppSetting("cmProgramAreaTermSetId", _logger, _config));
 
-                // Get all the job opportunities
-                //var jobOpportunityPage = await graphClient.Sites[siteId].Lists[listIdJobOpp].Items.GetAsync(rc =>
-                //{
-                //    // TODO: Specifcy every field
-                //    rc.QueryParameters.Expand = new[] 
-                //    { 
-                //        "fields" 
-                //    };
-                //});
-
+                // IMPORTANT: Confirm these are named the same for your environment
                 var selectColumns = new[]
                 {
                     "ContactEmail",
@@ -319,7 +311,7 @@ namespace GCStats
                     "ClassificationCodeLookupId",
                     "ClassificationLevelLookupId",
                     "NumberOfOpportunities",
-                    "DurationLookupId",          // was misspelled "DuratiopnLookupId"
+                    "DurationLookupId",
                     "DurationQuantity",
                     "Created",
                     "Modified",
@@ -331,16 +323,16 @@ namespace GCStats
                     "WorkArrangementLookupId",
                     "ApprovedStaffing",
                     "CityLookupId",
-                    "Skills",            // multi-value lookup IDs
+                    "Skills",
                     "JobType",
-                    "JobType_0",
-                    "ProgramArea",
-                    "ProgramArea_0"
+                    "Program_Area",
+                    "ProgramArea"
                 };
 
                 var jobOpportunityPage = await graphClient.Sites[siteId].Lists[listIdJobOpp].Items.GetAsync(rc =>
                 {
                     rc.QueryParameters.Expand = new[] { $"fields($select={string.Join(",", selectColumns)})" };
+                    //rc.QueryParameters.Expand = new[] { "fields" };
                 });
 
                 var countJobOpp = 0;
@@ -419,11 +411,102 @@ namespace GCStats
                                 var contactEmail = Globals.GetField(fields, "ContactEmail");
                                 var jobTitle = Globals.GetField(fields, "JobTitleEn");
 
+                                // TODO: ProgramArea is not working for some reason...
                                 var programAreaId = Globals.GetFieldOrNull(fields, "ProgramAreaId");
                                 programAreaIdBuffer.Add(programAreaId);
                                 programAreaBuffer.Add(programAreaId != null ? programAreas[programAreaId] : null);
 
                                 snapshotDateBuffer.Add(snapshotDate);
+
+                                // Skills
+                                var skillItems = new List<(string Id, string? Title)>();
+                                if (fields.TryGetValue("Skills", out var rawSkills) && rawSkills != null)
+                                {
+                                    IEnumerable<UntypedNode> nodes = rawSkills switch
+                                    {
+                                        UntypedArray arr => arr.GetValue(),
+                                        UntypedNode single => new[] { single },
+                                        _ => Enumerable.Empty<UntypedNode>()
+                                    };
+
+                                    foreach (var node in nodes)
+                                    {
+                                        if (node is UntypedObject obj)
+                                        {
+                                            var dict = obj.GetValue();
+
+                                            dict.TryGetValue("LookupId", out var lookupIdNode);
+                                            dict.TryGetValue("LookupValue", out var lookupValueNode);
+
+                                            var id = UntypedToString(lookupIdNode);
+                                            if (id != null)
+                                                skillItems.Add((id, UntypedToString(lookupValueNode)));
+                                        }
+                                        else
+                                        {
+                                            var id = UntypedToString(node);
+                                            if (id != null)
+                                                skillItems.Add((id, null));
+                                        }
+                                    }
+                                }
+
+                                foreach (var (skillId, lookupValue) in skillItems)
+                                {
+                                    jobOpportunityIdSkillsBuffer.Add(jobOpportunity.Id);
+                                    skillIdBuffer.Add(skillId);
+                                    titleSkillsBuffer.Add(skills.FirstOrDefault(s => s.Id == skillId)?.Title ?? lookupValue ?? string.Empty);
+                                    snapshotDateSkillsBuffer.Add(snapshotDate);
+                                    countSkills++;
+
+                                    if (skillIdBuffer.Count >= Globals.RowGroupBatchSize)
+                                        FlushSkillsBatchAsync().GetAwaiter().GetResult();
+                                }
+
+                                // Job Types
+                                var jobTypeItems = new List<(string Id, string? Title)>();
+                                if (fields.TryGetValue("JobType", out var rawJobTypes) && rawJobTypes != null)
+                                {
+                                    IEnumerable<UntypedNode> nodes = rawJobTypes switch
+                                    {
+                                        UntypedArray arr => arr.GetValue(),
+                                        UntypedNode single => new[] { single },
+                                        _ => Enumerable.Empty<UntypedNode>()
+                                    };
+
+                                    foreach (var node in nodes)
+                                    {
+                                        if (node is UntypedObject obj)
+                                        {
+                                            var dict = obj.GetValue();
+
+                                            dict.TryGetValue("Label", out var lookupLabelNode);
+                                            dict.TryGetValue("TermGuid", out var lookupGuidNode);
+
+                                            var id = UntypedToString(lookupGuidNode);
+                                            if (id != null)
+                                                jobTypeItems.Add((id, UntypedToString(lookupLabelNode)));
+                                        }
+                                        else
+                                        {
+                                            var id = UntypedToString(node);
+                                            if (id != null)
+                                                jobTypeItems.Add((id, null));
+                                        }
+                                    }
+                                }
+
+                                foreach (var jobType in jobTypeItems)
+                                {
+                                    jobOpportunityIdJobTypeBuffer.Add(jobOpportunity.Id);
+                                    jobTypeIdBuffer.Add(jobType.Id);
+                                    titleJobTypeBuffer.Add(jobType.Title!);
+                                    snapshotDateJobTypeBuffer.Add(snapshotDate);
+                                    countJobType++;
+
+                                    if (jobTypeIdBuffer.Count >= Globals.RowGroupBatchSize)
+                                        FlushJobTypeBatchAsync().GetAwaiter().GetResult();
+                                }
 
                                 if (idBuffer.Count >= Globals.RowGroupBatchSize)
                                 {
@@ -465,7 +548,7 @@ namespace GCStats
 
             var response = await graphClient.Sites[siteId].Lists[listId].Items.GetAsync(rc =>
             {
-                rc.QueryParameters.Expand = selectColumns is null || selectColumns.Length == 0 ? ["fields"] : [$"fields($select={string.Join(",", selectColumns)})"];
+                rc.QueryParameters.Expand = selectColumns == null || selectColumns.Length == 0 ? ["fields"] : [$"fields($select={string.Join(",", selectColumns)})"];
             });
 
             if (response == null)
@@ -548,5 +631,17 @@ namespace GCStats
 
             return values;
         }
+
+        private static string? UntypedToString(UntypedNode? node) => node switch
+        {
+            UntypedString s => s.GetValue(),
+            UntypedInteger i => i.GetValue().ToString(CultureInfo.InvariantCulture),
+            UntypedLong l => l.GetValue().ToString(CultureInfo.InvariantCulture),
+            UntypedFloat f => f.GetValue().ToString("0", CultureInfo.InvariantCulture),
+            UntypedDouble d => d.GetValue().ToString("0", CultureInfo.InvariantCulture),
+            UntypedDecimal m => m.GetValue().ToString("0", CultureInfo.InvariantCulture),
+            UntypedBoolean b => b.GetValue().ToString(),
+            _ => null
+        };
     }
 }
