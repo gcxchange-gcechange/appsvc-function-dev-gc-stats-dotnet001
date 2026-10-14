@@ -4,10 +4,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
-using Microsoft.Graph.Models.TermStore;
 using Microsoft.Kiota.Abstractions.Serialization;
 using Parquet;
 using Parquet.Schema;
+using System.Collections.Concurrent;
 using System.Globalization;
 
 namespace GCStats
@@ -22,6 +22,7 @@ namespace GCStats
         public const string JobOpportunityJobTypesContainerName = "job-opportunity-job-types";
 
         private record LookupValue(string Id, string? Title, string? ParentId);
+        private string ProgramAreaColumnName = "Program_Area";
 
         public JobOpportunities(ILogger<JobOpportunities> logger, IConfiguration config)
         {
@@ -298,9 +299,7 @@ namespace GCStats
                 var regions = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmRegionListId", _logger, _config), new[] { "NameEn", "TitleEn", "ProvinceLookupId" });
                 var provinces = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmProvinceListId", _logger, _config), new[] { "NameEn", "TitleEn" });
                 var skills = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSkillsListId", _logger, _config));
-
-                // Cache the term sets
-                var programAreas = await LoadTermSetValuesAsync(graphClient, "root", Auth.GetAppSetting("cmProgramAreaTermSetId", _logger, _config));
+                var programAreaByItem = await LoadProgramAreasAsync(graphClient, siteId, listIdJobOpp, ProgramAreaColumnName);
 
                 // IMPORTANT: Confirm these are named the same for your environment
                 var selectColumns = new[]
@@ -325,8 +324,7 @@ namespace GCStats
                     "CityLookupId",
                     "Skills",
                     "JobType",
-                    "Program_Area",
-                    "ProgramArea"
+                    ProgramAreaColumnName,
                 };
 
                 var jobOpportunityPage = await graphClient.Sites[siteId].Lists[listIdJobOpp].Items.GetAsync(rc =>
@@ -408,13 +406,9 @@ namespace GCStats
                                 provinceIdBuffer.Add(provinceId);
                                 provinceBuffer.Add(provinceId != null ? provinces.Where(item => item.Id == provinceId).FirstOrDefault()?.Title : null);
 
-                                var contactEmail = Globals.GetField(fields, "ContactEmail");
-                                var jobTitle = Globals.GetField(fields, "JobTitleEn");
-
-                                // TODO: ProgramArea is not working for some reason...
-                                var programAreaId = Globals.GetFieldOrNull(fields, "ProgramAreaId");
-                                programAreaIdBuffer.Add(programAreaId);
-                                programAreaBuffer.Add(programAreaId != null ? programAreas[programAreaId] : null);
+                                programAreaByItem.TryGetValue(jobOpportunity.Id, out var pa);
+                                programAreaIdBuffer.Add(pa.TermId);
+                                programAreaBuffer.Add(pa.Label);
 
                                 snapshotDateBuffer.Add(snapshotDate);
 
@@ -593,43 +587,65 @@ namespace GCStats
             return values;
         }
 
-        private async Task<Dictionary<string, string?>> LoadTermSetValuesAsync(GraphServiceClient graphClient, string siteId, string termSetId)
+        private async Task<ConcurrentDictionary<string, (string? TermId, string? Label)>> LoadProgramAreasAsync(
+    GraphServiceClient graphClient, string siteId, string listId, string columnName)
         {
-            var values = new Dictionary<string, string?>();
+            var result = new ConcurrentDictionary<string, (string?, string?)>();
 
-            var response = await graphClient.Sites[siteId].TermStore.Sets[termSetId].Terms.GetAsync();
+            // 1. Collect item IDs with a lightweight call
+            var ids = new List<string>();
+            var page = await graphClient.Sites[siteId].Lists[listId].Items.GetAsync(rc =>
+            {
+                rc.QueryParameters.Select = new[] { "id" };
+                rc.QueryParameters.Top = 999;
+            });
 
-            if (response == null)
-                return values;
+            if (page == null) return result;
 
-            var pageIterator = PageIterator<Term, TermCollectionResponse>
-                .CreatePageIterator(
-                    graphClient,
-                    response,
-                    term =>
+            var idIterator = PageIterator<ListItem, ListItemCollectionResponse>
+                .CreatePageIterator(graphClient, page, item =>
+                {
+                    if (item.Id != null) ids.Add(item.Id);
+                    return true;
+                });
+            await idIterator.IterateAsync();
+
+            // 2. Fetch each item's fields, a few at a time
+            using var gate = new SemaphoreSlim(8);
+
+            var tasks = ids.Select(async id =>
+            {
+                await gate.WaitAsync();
+                try
+                {
+                    var f = await graphClient.Sites[siteId].Lists[listId].Items[id].Fields.GetAsync();
+                    if (f?.AdditionalData == null ||
+                        !f.AdditionalData.TryGetValue(columnName, out var raw) || raw == null)
+                        return;
+
+                    UntypedNode? node = raw switch
                     {
-                        if (term.Id != null && term.Labels != null)
-                        {
-                            string? value = null;
+                        UntypedArray arr => arr.GetValue().FirstOrDefault(),
+                        UntypedNode n => n,
+                        _ => null
+                    };
 
-                            foreach (var label in term.Labels)
-                            {
-                                if (label.LanguageTag!.Equals("en-us", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    value = label.Name?.ToString();
-                                    break;
-                                }
-                            }
+                    if (node is UntypedObject obj)
+                    {
+                        var dict = obj.GetValue();
+                        dict.TryGetValue("TermGuid", out var termNode);
+                        dict.TryGetValue("Label", out var labelNode);
+                        result[id] = (UntypedToString(termNode), UntypedToString(labelNode));
+                    }
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
 
-                            values[term.Id] = value;
-                        }
-
-                        return true;
-                    });
-
-            await pageIterator.IterateAsync();
-
-            return values;
+            await Task.WhenAll(tasks);
+            return result;
         }
 
         private static string? UntypedToString(UntypedNode? node) => node switch
