@@ -36,8 +36,8 @@ namespace GCStats
 
         [Function("JobOpportunities")]
         [QueueOutput("process-job-opportunities", Connection = "AzureWebJobsStorage")]
-        public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
-        //public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
         {
             _logger.LogInformation("JobOpportunities timer trigger executed at: {Time}", DateTime.UtcNow);
 
