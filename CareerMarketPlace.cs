@@ -1,10 +1,14 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Azure.Identity;
+using Azure.Storage.Blobs;
+using GCStats.Models;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Kiota.Abstractions.Serialization;
+using Newtonsoft.Json;
 using Parquet;
 using Parquet.Schema;
 using System.Collections.Concurrent;
@@ -22,7 +26,7 @@ namespace GCStats
         public const string JobOpportunityJobTypesContainerName = "job-opportunity-job-types";
 
         private record LookupValue(string Id, string? Title, string? ParentId);
-        private string ProgramAreaColumnName = "Program_Area";
+        private string ProgramAreaColumnName = "Program_Area"; // TODO: Make this an app setting?
 
         public JobOpportunities(ILogger<JobOpportunities> logger, IConfiguration config)
         {
@@ -61,49 +65,51 @@ namespace GCStats
                 using var blobStreamJobType = await blobClientJobType.OpenWriteAsync(overwrite: true);
 
                 // JobOpportunity fields
-                var idField = new DataField<string>("Id");
+                var idField = new DataField<int>("Id");
+                var viewCountField = new DataField<int>("ViewCount");
+                var applyCountField = new DataField<int>("ApplyCount");
                 var authorMailField = new DataField<string>("AuthorMail");
-                var departmentIdField = new DataField<string>("DepartmentId");
+                var departmentIdField = new DataField<int>("DepartmentId");
                 var departmentField = new DataField<string>("Department");
                 var titleEnField = new DataField<string>("JobTitleEn");
-                var classCodeIdField = new DataField<string>("ClassificationCodeId");
+                var classCodeIdField = new DataField<int>("ClassificationCodeId");
                 var classCodeField = new DataField<string>("ClassificationCode");
-                var classLevelIdField = new DataField<string>("ClassificationLevelId");
+                var classLevelIdField = new DataField<int>("ClassificationLevelId");
                 var classLevelField = new DataField<string>("ClassificationLevel");
                 var numOpportunitiesField = new DataField<int>("NumberOfOpportunities");
-                var durationIdField = new DataField<string?>("DurationId");
+                var durationIdField = new DataField<int?>("DurationId");
                 var durationField = new DataField<string?>("Duration");
                 var durationQuantityField = new DataField<double>("DurationQuantity");
                 var creationDateField = new DataField<DateTime>("CreationDate");
                 var modificationDateField = new DataField<DateTime>("ModificationDate");
                 var applicationDeadlineDateField = new DataField<DateTime>("ApplicationDeadlineDate");
-                var workscheduleIdField = new DataField<string>("WorkScheduleId");
+                var workscheduleIdField = new DataField<int>("WorkScheduleId");
                 var workscheduleField = new DataField<string>("WorkSchedule");
-                var securityClearanceIdField = new DataField<string>("SecurityClearanceId");
+                var securityClearanceIdField = new DataField<int>("SecurityClearanceId");
                 var securityClearanceField = new DataField<string>("SecurityClearance");
                 var languageComprehensionField = new DataField<string?>("LanguageComprehension");
-                var languageRequirementIdField = new DataField<string>("LanguageRequirementId");
+                var languageRequirementIdField = new DataField<int>("LanguageRequirementId");
                 var languageRequirementField = new DataField<string>("LanguageRequirement");
-                var workArrangementIdField = new DataField<string>("WorkArrangementId");
+                var workArrangementIdField = new DataField<int>("WorkArrangementId");
                 var workArrangementField = new DataField<string>("WorkArrangement");
                 var approvedStaffindField = new DataField<bool>("ApprovedStaffing");
-                var cityIdField = new DataField<string?>("CityId");
+                var cityIdField = new DataField<int?>("CityId");
                 var cityField = new DataField<string?>("City");
-                var regionIdField = new DataField<string?>("RegionId");
+                var regionIdField = new DataField<int?>("RegionId");
                 var regionField = new DataField<string?>("Region");
-                var provinceIdField = new DataField<string?>("ProvinceId");
+                var provinceIdField = new DataField<int?>("ProvinceId");
                 var provinceField = new DataField<string?>("Province");
                 var programAreaIdField = new DataField<string?>("ProgramAreaId");
                 var programAreaField = new DataField<string?>("ProgramArea");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
                 // Skill/JobType fields
-                var jobOpportunityIdField = new DataField<string>("JobOpportunityId");
-                var skillIdField = new DataField<string>("SkillId");
+                var jobOpportunityIdField = new DataField<int>("JobOpportunityId");
+                var skillIdField = new DataField<int>("SkillId");
                 var jobTypeIdField = new DataField<string>("JobTypeId");
                 var titleField = new DataField<string>("Title");
 
-                var schemaJobOpp = new ParquetSchema(idField, authorMailField, departmentIdField, departmentField, titleEnField, classCodeIdField, classCodeField, classLevelIdField,
+                var schemaJobOpp = new ParquetSchema(idField, viewCountField, applyCountField, authorMailField, departmentIdField, departmentField, titleEnField, classCodeIdField, classCodeField, classLevelIdField,
                     classLevelField, numOpportunitiesField, durationIdField, durationField, durationQuantityField, creationDateField, modificationDateField, applicationDeadlineDateField,
                     workscheduleIdField, workscheduleField, securityClearanceIdField, securityClearanceField, languageComprehensionField, languageRequirementIdField, languageRequirementField,
                     workArrangementIdField, workArrangementField, approvedStaffindField, cityIdField, cityField, regionIdField, regionField, provinceIdField, provinceField, programAreaIdField,
@@ -117,37 +123,39 @@ namespace GCStats
                 await using var parquetWriterJobType = await ParquetWriter.CreateAsync(schemaJobType, blobStreamJobType, Globals.ParquetOptions);
 
                 // JobOpportunity buffers
-                var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var idBuffer = new List<int>(Globals.RowGroupBatchSize);
+                var viewCountBuffer = new List<int>(Globals.RowGroupBatchSize);
+                var applyCountBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var authorMailBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var departmentIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var departmentIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var departmentBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var titleEnBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var classCodeIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var classCodeIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var classCodeBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var classLevelIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var classLevelIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var classLevelBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var numOpportunitiesBuffer = new List<int>(Globals.RowGroupBatchSize);
-                var durationIdBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                var durationIdBuffer = new List<int?>(Globals.RowGroupBatchSize);
                 var durationBuffer = new List<string?>(Globals.RowGroupBatchSize);
                 var durationQuantityBuffer = new List<double>(Globals.RowGroupBatchSize);
                 var creationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
                 var modificationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
                 var applicationDeadlineDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-                var workscheduleIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var workscheduleIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var workscheduleBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var securityClearanceIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var securityClearanceIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var securityClearanceBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var languageComprehensionBuffer = new List<string?>(Globals.RowGroupBatchSize);
-                var languageRequirementIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var languageRequirementIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var languageRequirementBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var workArrangementIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var workArrangementIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var workArrangementBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var approvedStaffindBuffer = new List<bool>(Globals.RowGroupBatchSize);
-                var cityIdBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                var cityIdBuffer = new List<int?>(Globals.RowGroupBatchSize);
                 var cityBuffer = new List<string?>(Globals.RowGroupBatchSize);
-                var regionIdBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                var regionIdBuffer = new List<int?>(Globals.RowGroupBatchSize);
                 var regionBuffer = new List<string?>(Globals.RowGroupBatchSize);
-                var provinceIdBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                var provinceIdBuffer = new List<int?>(Globals.RowGroupBatchSize);
                 var provinceBuffer = new List<string?>(Globals.RowGroupBatchSize);
                 var programAreaIdBuffer = new List<string?>(Globals.RowGroupBatchSize);
                 var programAreaBuffer = new List<string?>(Globals.RowGroupBatchSize);
@@ -160,43 +168,47 @@ namespace GCStats
 
                     using var groupWriter = parquetWriterJobOpp.CreateRowGroup();
 
-                    await groupWriter.WriteAsync(idField, idBuffer);
+                    await groupWriter.WriteAsync<int>(idField, idBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(viewCountField, viewCountBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(applyCountField, applyCountBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(authorMailField, authorMailBuffer);
-                    await groupWriter.WriteAsync(departmentIdField, departmentIdBuffer);
+                    await groupWriter.WriteAsync<int>(departmentIdField, departmentIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(departmentField, departmentBuffer);
                     await groupWriter.WriteAsync(titleEnField, titleEnBuffer);
-                    await groupWriter.WriteAsync(classCodeIdField, classCodeIdBuffer);
+                    await groupWriter.WriteAsync<int>(classCodeIdField, classCodeIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(classCodeField, classCodeBuffer);
-                    await groupWriter.WriteAsync(classLevelIdField, classLevelIdBuffer);
+                    await groupWriter.WriteAsync<int>(classLevelIdField, classLevelIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(classLevelField, classLevelBuffer);
                     await groupWriter.WriteAsync<int>(numOpportunitiesField, numOpportunitiesBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync(durationIdField, durationIdBuffer);
+                    await groupWriter.WriteAsync<int>(durationIdField, durationIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(durationField, durationBuffer);
                     await groupWriter.WriteAsync<double>(durationQuantityField, durationQuantityBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<DateTime>(modificationDateField, modificationDateBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync<DateTime>(applicationDeadlineDateField, applicationDeadlineDateBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync(workscheduleIdField, workscheduleIdBuffer);
+                    await groupWriter.WriteAsync<int>(workscheduleIdField, workscheduleIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(workscheduleField, workscheduleBuffer);
-                    await groupWriter.WriteAsync(securityClearanceIdField, securityClearanceIdBuffer);
+                    await groupWriter.WriteAsync<int>(securityClearanceIdField, securityClearanceIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(securityClearanceField, securityClearanceBuffer);
                     await groupWriter.WriteAsync(languageComprehensionField, languageComprehensionBuffer);
-                    await groupWriter.WriteAsync(languageRequirementIdField, languageRequirementIdBuffer);
+                    await groupWriter.WriteAsync<int>(languageRequirementIdField, languageRequirementIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(languageRequirementField, languageRequirementBuffer);
-                    await groupWriter.WriteAsync(workArrangementIdField, workArrangementIdBuffer);
+                    await groupWriter.WriteAsync<int>(workArrangementIdField, workArrangementIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(workArrangementField, workArrangementBuffer);
                     await groupWriter.WriteAsync<bool>(approvedStaffindField, approvedStaffindBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync(cityIdField, cityIdBuffer);
+                    await groupWriter.WriteAsync<int>(cityIdField, cityIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(cityField, cityBuffer);
-                    await groupWriter.WriteAsync(regionIdField, regionIdBuffer);
+                    await groupWriter.WriteAsync<int>(regionIdField, regionIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(regionField, regionBuffer);
-                    await groupWriter.WriteAsync(provinceIdField, provinceIdBuffer);
+                    await groupWriter.WriteAsync<int>(provinceIdField, provinceIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(provinceField, provinceBuffer);
                     await groupWriter.WriteAsync(programAreaIdField, programAreaIdBuffer);
                     await groupWriter.WriteAsync(programAreaField, programAreaBuffer);
                     await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
 
                     idBuffer.Clear();
+                    viewCountBuffer.Clear();
+                    applyCountBuffer.Clear();
                     authorMailBuffer.Clear();
                     departmentIdBuffer.Clear();
                     departmentBuffer.Clear();
@@ -234,8 +246,8 @@ namespace GCStats
                 }
 
                 // Skills buffers
-                var jobOpportunityIdSkillsBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var skillIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var jobOpportunityIdSkillsBuffer = new List<int>(Globals.RowGroupBatchSize);
+                var skillIdBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var titleSkillsBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var snapshotDateSkillsBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
@@ -246,8 +258,8 @@ namespace GCStats
 
                     using var groupWriter = parquetWriterSkills.CreateRowGroup();
 
-                    await groupWriter.WriteAsync(jobOpportunityIdField, jobOpportunityIdSkillsBuffer);
-                    await groupWriter.WriteAsync(skillIdField, skillIdBuffer);
+                    await groupWriter.WriteAsync<int>(jobOpportunityIdField, jobOpportunityIdSkillsBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(skillIdField, skillIdBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(titleField, titleSkillsBuffer);
                     await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateSkillsBuffer.ToArray().AsMemory());
 
@@ -258,7 +270,7 @@ namespace GCStats
                 }
 
                 // JobType buffers
-                var jobOpportunityIdJobTypeBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var jobOpportunityIdJobTypeBuffer = new List<int>(Globals.RowGroupBatchSize);
                 var jobTypeIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var titleJobTypeBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var snapshotDateJobTypeBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
@@ -270,7 +282,7 @@ namespace GCStats
 
                     using var groupWriter = parquetWriterJobType.CreateRowGroup();
 
-                    await groupWriter.WriteAsync(jobOpportunityIdField, jobOpportunityIdJobTypeBuffer);
+                    await groupWriter.WriteAsync<int>(jobOpportunityIdField, jobOpportunityIdJobTypeBuffer.ToArray().AsMemory());
                     await groupWriter.WriteAsync(jobTypeIdField, jobTypeIdBuffer);
                     await groupWriter.WriteAsync(titleField, titleJobTypeBuffer);
                     await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateJobTypeBuffer.ToArray().AsMemory());
@@ -300,6 +312,10 @@ namespace GCStats
                 var provinces = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmProvinceListId", _logger, _config), new[] { "NameEn", "TitleEn" });
                 var skills = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSkillsListId", _logger, _config));
                 var programAreaByItem = await LoadProgramAreasAsync(graphClient, siteId, listIdJobOpp, ProgramAreaColumnName);
+
+                // Cache the Google Analytics events
+                var viewEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ViewJobOpportunity.json", "stats");
+                var applyEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ApplyJobOpportunity.json", "stats");
 
                 // IMPORTANT: Confirm these are named the same for your environment
                 var selectColumns = new[]
@@ -346,27 +362,33 @@ namespace GCStats
                             var fields = jobOpportunity.Fields?.AdditionalData;
                             if (jobOpportunity.Id != null && fields != null)
                             {
-                                idBuffer.Add(jobOpportunity.Id);
+                                idBuffer.Add(Convert.ToInt32(jobOpportunity.Id));
                                 authorMailBuffer.Add(Globals.GetField(fields, "ContactEmail"));
 
+                                var viewCount = viewEvents.FirstOrDefault(e => e.JobOpportunityId == jobOpportunity.Id)?.EventCount ?? 0;
+                                viewCountBuffer.Add(viewCount);
+
+                                var applyCount = applyEvents.FirstOrDefault(e => e.JobOpportunityId == jobOpportunity.Id)?.EventCount ?? 0;
+                                applyCountBuffer.Add(applyCount);
+
                                 var departmentId = Globals.GetField(fields, "DepartmentLookupId");
-                                departmentIdBuffer.Add(departmentId);
+                                departmentIdBuffer.Add(Convert.ToInt32(departmentId));
                                 departmentBuffer.Add(departments.Where(item => item.Id == departmentId).FirstOrDefault()?.Title!);
 
                                 titleEnBuffer.Add(Globals.GetField(fields, "JobTitleEn"));
 
                                 var classCodeId = Globals.GetField(fields, "ClassificationCodeLookupId");
-                                classCodeIdBuffer.Add(classCodeId);
+                                classCodeIdBuffer.Add(Convert.ToInt32(classCodeId));
                                 classCodeBuffer.Add(classificationCodes.Where(item => item.Id == classCodeId).FirstOrDefault()?.Title!);
 
                                 var classLevelId = Globals.GetField(fields, "ClassificationLevelLookupId");
-                                classLevelIdBuffer.Add(classLevelId);
+                                classLevelIdBuffer.Add(Convert.ToInt32(classLevelId));
                                 classLevelBuffer.Add(classificationLevels.Where(item => item.Id == classLevelId).FirstOrDefault()?.Title!);
 
                                 numOpportunitiesBuffer.Add(Convert.ToInt32(Convert.ToDouble(Globals.GetField(fields, "NumberOfOpportunities"))));
 
                                 var durationId = Globals.GetFieldOrNull(fields, "DurationLookupId");
-                                durationIdBuffer.Add(durationId);
+                                durationIdBuffer.Add(Convert.ToInt32(durationId));
                                 durationBuffer.Add(durationId != null ? durations.Where(item => item.Id == durationId).FirstOrDefault()?.Title! : null);
 
                                 durationQuantityBuffer.Add(Convert.ToDouble(Globals.GetField(fields, "DurationQuantity")));
@@ -375,35 +397,35 @@ namespace GCStats
                                 applicationDeadlineDateBuffer.Add(Convert.ToDateTime(Globals.GetField(fields, "ApplicationDeadlineDate")));
 
                                 var workScheduleId = Globals.GetField(fields, "WorkScheduleLookupId");
-                                workscheduleIdBuffer.Add(workScheduleId);
+                                workscheduleIdBuffer.Add(Convert.ToInt32(workScheduleId));
                                 workscheduleBuffer.Add(workSchedules.Where(item => item.Id == workScheduleId).FirstOrDefault()?.Title!);
 
                                 var securityClearanceId = Globals.GetField(fields, "SecurityClearanceLookupId");
-                                securityClearanceIdBuffer.Add(securityClearanceId);
+                                securityClearanceIdBuffer.Add(Convert.ToInt32(securityClearanceId));
                                 securityClearanceBuffer.Add(securityClearances.Where(item => item.Id == securityClearanceId).FirstOrDefault()?.Title!);
 
                                 languageComprehensionBuffer.Add(Globals.GetField(fields, "LanguageComprehension"));
 
                                 var languageRequirementId = Globals.GetField(fields, "LanguageRequirementLookupId");
-                                languageRequirementIdBuffer.Add(languageRequirementId);
+                                languageRequirementIdBuffer.Add(Convert.ToInt32(languageRequirementId));
                                 languageRequirementBuffer.Add(languageRequirements.Where(item => item.Id == languageRequirementId).FirstOrDefault()?.Title!);
 
                                 var workArrangementId = Globals.GetField(fields, "WorkArrangementLookupId");
-                                workArrangementIdBuffer.Add(workArrangementId);
+                                workArrangementIdBuffer.Add(Convert.ToInt32(workArrangementId));
                                 workArrangementBuffer.Add(workArrangements.Where(item => item.Id == workArrangementId).FirstOrDefault()?.Title!);
 
                                 approvedStaffindBuffer.Add(Convert.ToBoolean(Globals.GetField(fields, "ApprovedStaffing")));
 
                                 var cityId = Globals.GetFieldOrNull(fields, "CityLookupId");
-                                cityIdBuffer.Add(cityId);
+                                cityIdBuffer.Add(Convert.ToInt32(cityId));
                                 cityBuffer.Add(cityId != null ? cities.Where(item => item.Id == cityId).FirstOrDefault()?.Title : null);
 
                                 var regionId = cityId != null ? cities.Where(city => city.Id == cityId).FirstOrDefault()?.ParentId : null;
-                                regionIdBuffer.Add(regionId);
+                                regionIdBuffer.Add(Convert.ToInt32(regionId));
                                 regionBuffer.Add(regionId != null ? regions.Where(item => item.Id == regionId).FirstOrDefault()?.Title : null);
 
                                 var provinceId = regionId != null ? regions.Where(region => region.Id == regionId).FirstOrDefault()?.ParentId : null;
-                                provinceIdBuffer.Add(provinceId);
+                                provinceIdBuffer.Add(Convert.ToInt32(provinceId));
                                 provinceBuffer.Add(provinceId != null ? provinces.Where(item => item.Id == provinceId).FirstOrDefault()?.Title : null);
 
                                 programAreaByItem.TryGetValue(jobOpportunity.Id, out var pa);
@@ -447,8 +469,8 @@ namespace GCStats
 
                                 foreach (var (skillId, lookupValue) in skillItems)
                                 {
-                                    jobOpportunityIdSkillsBuffer.Add(jobOpportunity.Id);
-                                    skillIdBuffer.Add(skillId);
+                                    jobOpportunityIdSkillsBuffer.Add(Convert.ToInt32(jobOpportunity.Id));
+                                    skillIdBuffer.Add(Convert.ToInt32(skillId));
                                     titleSkillsBuffer.Add(skills.FirstOrDefault(s => s.Id == skillId)?.Title ?? lookupValue ?? string.Empty);
                                     snapshotDateSkillsBuffer.Add(snapshotDate);
                                     countSkills++;
@@ -492,7 +514,7 @@ namespace GCStats
 
                                 foreach (var jobType in jobTypeItems)
                                 {
-                                    jobOpportunityIdJobTypeBuffer.Add(jobOpportunity.Id);
+                                    jobOpportunityIdJobTypeBuffer.Add(Convert.ToInt32(jobOpportunity.Id));
                                     jobTypeIdBuffer.Add(jobType.Id);
                                     titleJobTypeBuffer.Add(jobType.Title!);
                                     snapshotDateJobTypeBuffer.Add(snapshotDate);
@@ -587,6 +609,7 @@ namespace GCStats
             return values;
         }
 
+        // For some reason the Program Area column is the only column that DOES NOT load when we get the items from the list... so we have to load them all first
         private async Task<ConcurrentDictionary<string, (string? TermId, string? Label)>> LoadProgramAreasAsync(
     GraphServiceClient graphClient, string siteId, string listId, string columnName)
         {
@@ -646,6 +669,36 @@ namespace GCStats
 
             await Task.WhenAll(tasks);
             return result;
+        }
+
+        private async Task<List<GoogleAnalyticsEvent>> GetGoogleAnalyticsEvents(string blobName, string containerName)
+        {
+            try
+            {
+                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrlGA", _logger, _config);
+                var isLocal = Auth.GetAppSetting("isLocal", _logger, _config, false);
+                var credential = isLocal == "true" ? new AzureCliCredential() : (Azure.Core.TokenCredential)new DefaultAzureCredential();
+
+                var blobServiceClient = new BlobServiceClient(new Uri(storageAccountUrl), credential);
+                var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
+                var blobClient = containerClient.GetBlobClient(blobName);
+
+                if (!await blobClient.ExistsAsync())
+                    throw new FileNotFoundException($"Blob {blobName} not found in container {containerName}");
+
+                var response = await blobClient.DownloadContentAsync();
+                var json = response.Value.Content.ToString();
+
+                var events = JsonConvert.DeserializeObject<List<GoogleAnalyticsEvent>>(json);
+
+                return events ?? new List<GoogleAnalyticsEvent>();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("GetGoogleAnalyticsReport failed");
+                _logger.LogError(ex.Message);
+                throw;
+            }
         }
 
         private static string? UntypedToString(UntypedNode? node) => node switch
