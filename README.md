@@ -23,6 +23,7 @@ In order for the application to run you will need the following settings in your
 | keyVaultUrl | The address for the key vault
 | secretName | The secret name that holds the API secret value
 | storageAccountUrl | The address for the storage account
+| storageAccountUrlGA | The address for the storage account that stores the GA metrics
 | fabricWarehouseServer | The SQL connection string of the fabric warehouse
 | fabricWarehouseDatabase | The name of the fabric warehouse
 | workspaceId | The workspace Id for log analytics
