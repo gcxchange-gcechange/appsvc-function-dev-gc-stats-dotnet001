@@ -43,6 +43,4 @@ In order for the application to run you will need the following settings in your
 | cmRegionListId | The listId of the Region list in the Career Marketplace
 | cmProvinceListId | The listId of the Province lsit in the Career Marketplace
 | cmSkillsListId | The listId of the Skills list in the Career Marketplace
-| cmJobTypeTermSetId | The term set ID for JobType (found in the SP term store)
-| cmProgramAreaTermSetId | Ther term set ID for ProgramArea (found in the SP term store)
 | isLocal | Optional. Should be set to `true` if you want to use `AzureCliCredential` for authentication. (use `az login` before running locally)
