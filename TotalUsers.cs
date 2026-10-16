@@ -17,8 +17,6 @@ namespace GCStats
         [Function("TotalUsers")]
         [QueueOutput("process-total-users", Connection = "AzureWebJobsStorage")]
         public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-        //[Function("TotalUsers")]
-        //[QueueOutput("process-total-users", Connection = "AzureWebJobsStorage")]
         //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
             _logger.LogInformation("TotalUsers timer trigger executed at: {Time}", DateTime.UtcNow);

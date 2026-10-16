@@ -28,6 +28,7 @@ namespace GCStats
 
                 var idField = new DataField<string>("Id");
                 var mailField = new DataField<string?>("Mail");
+                var domainField = new DataField<string?>("Domain");
                 var upnField = new DataField<string?>("UserPrincipalName");
                 var displayNameField = new DataField<string?>("DisplayName");
                 var userTypeField = new DataField<string?>("UserType");
@@ -38,7 +39,7 @@ namespace GCStats
                 var externalUserStateField = new DataField<string?>("ExternalUserState");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
-                var schema = new ParquetSchema(idField, mailField, upnField, displayNameField, userTypeField, accountEnabledField, preferredLanguageField,
+                var schema = new ParquetSchema(idField, mailField, domainField, upnField, displayNameField, userTypeField, accountEnabledField, preferredLanguageField,
                     createdDateTimeField, lastPasswordChangeField, externalUserStateField, snapshotDateField);
 
                 await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
@@ -48,6 +49,7 @@ namespace GCStats
 
                 var idBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var mailBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                var domainBuffer = new List<string?>(Globals.RowGroupBatchSize);
                 var upnBuffer = new List<string?>(Globals.RowGroupBatchSize);
                 var displayNameBuffer = new List<string?>(Globals.RowGroupBatchSize);
                 var userTypeBuffer = new List<string?>(Globals.RowGroupBatchSize);
@@ -67,6 +69,7 @@ namespace GCStats
 
                     await groupWriter.WriteAsync(idField, idBuffer);
                     await groupWriter.WriteAsync(mailField, mailBuffer);
+                    await groupWriter.WriteAsync(domainField, domainBuffer);
                     await groupWriter.WriteAsync(upnField, upnBuffer);
                     await groupWriter.WriteAsync(displayNameField, displayNameBuffer);
                     await groupWriter.WriteAsync(userTypeField, userTypeBuffer);
@@ -79,6 +82,7 @@ namespace GCStats
 
                     idBuffer.Clear();
                     mailBuffer.Clear();
+                    domainBuffer.Clear();
                     upnBuffer.Clear();
                     displayNameBuffer.Clear();
                     userTypeBuffer.Clear();
@@ -120,6 +124,7 @@ namespace GCStats
                             {
                                 idBuffer.Add(user.Id);
                                 mailBuffer.Add(user.Mail);
+                                domainBuffer.Add(GetUserDomain(user));
                                 upnBuffer.Add(user.UserPrincipalName);
                                 displayNameBuffer.Add(user.DisplayName);
                                 userTypeBuffer.Add(user.UserType);
@@ -159,6 +164,44 @@ namespace GCStats
                 log.LogError(ex.Message);
                 throw;
             }
+        }
+
+        private static string? GetUserDomain(User user)
+        {
+            var email = user.Mail ?? user.OtherMails?.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(email) && email.Contains('@'))
+                return email.Split('@').Last().ToLowerInvariant();
+
+            var upn = user.UserPrincipalName;
+            if (string.IsNullOrWhiteSpace(upn))
+                return null;
+
+            var guestDomain = GetGuestUserDomain(upn);
+            if (guestDomain != null)
+                return guestDomain;
+
+            var at = upn.LastIndexOf('@');
+            if (at >= 0 && at < upn.Length - 1)
+                return upn.Substring(at + 1).ToLowerInvariant();
+
+            return null;
+        }
+
+        private static string? GetGuestUserDomain(string? upn)
+        {
+            if (string.IsNullOrWhiteSpace(upn))
+                return null;
+
+            var extIndex = upn.IndexOf("#EXT#", StringComparison.OrdinalIgnoreCase);
+            if (extIndex < 0)
+                return null; 
+
+            var beforeExt = upn.Substring(0, extIndex);
+            var underscore = beforeExt.LastIndexOf('_');
+            if (underscore < 0 || underscore == beforeExt.Length - 1)
+                return null;
+
+            return beforeExt.Substring(underscore + 1).ToLowerInvariant();
         }
     }
 }
