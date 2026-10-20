@@ -252,7 +252,7 @@ namespace GCStats
                                     Region = "CAN",
                                     Query = new SearchQuery
                                     {
-                                        QueryString = $"FileExtension:aspx AND NOT PromotedState:2 AND NOT Author:\"System Account\" AND Created:{startCreation}..{endCreation}"
+                                        QueryString = $"FileExtension:aspx AND NOT Author:\"System Account\" AND Created:{startCreation}..{endCreation}"
                                     },
                                     Fields = new List<string> 
                                     { 
