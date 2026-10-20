@@ -63,7 +63,7 @@ namespace GCStats
 
                 using var copyCmd = new SqlCommand(
                     $"""
-                     COPY INTO dbo.TotalUsers
+                     COPY INTO dbo.Users
                      FROM '{blobUrl}'
                      WITH (
                          FILE_TYPE = 'PARQUET',
