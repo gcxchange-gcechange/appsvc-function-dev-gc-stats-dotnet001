@@ -32,6 +32,7 @@
 	<PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Timer" Version="4.*" />
 	<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
 	<PackageReference Include="Parquet.Net" Version="6.1.0" />
+	<PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
   </ItemGroup>
 
 </Project>
