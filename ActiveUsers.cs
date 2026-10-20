@@ -68,36 +68,36 @@ namespace GCStats
                     timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24))
                 );
 
-                var idField = new DataField<string>("Id");
+                var userIdField = new DataField<string>("UserId");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
-                var schema = new ParquetSchema(idField, snapshotDateField);
+                var schema = new ParquetSchema(userIdField, snapshotDateField);
 
                 using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
                 await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
 
-                var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+                var userIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
                 async Task FlushBatchAsync()
                 {
-                    if (idBuffer.Count == 0)
+                    if (userIdBuffer.Count == 0)
                         return;
 
                     using var groupWriter = parquetWriter.CreateRowGroup();
 
-                    await groupWriter.WriteAsync(idField, idBuffer);
+                    await groupWriter.WriteAsync(userIdField, userIdBuffer);
                     await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
 
-                    idBuffer.Clear();
+                    userIdBuffer.Clear();
                     snapshotDateBuffer.Clear();
                 }
                 
                 foreach (var row in response.Value.Table.Rows)
                 {
-                    idBuffer.Add(row["UserId"]?.ToString() ?? string.Empty);
+                    userIdBuffer.Add(row["UserId"]?.ToString() ?? string.Empty);
                     snapshotDateBuffer.Add(snapshotDate);
 
-                    if (idBuffer.Count >= Globals.RowGroupBatchSize)
+                    if (userIdBuffer.Count >= Globals.RowGroupBatchSize)
                     {
                         FlushBatchAsync().GetAwaiter().GetResult();
                     }
