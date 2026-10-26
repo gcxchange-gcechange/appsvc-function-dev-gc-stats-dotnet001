@@ -346,7 +346,7 @@ public class TotalFiles
 
                             if (idBuffer.Count >= Globals.RowGroupBatchSize)
                             {
-                                FlushBatchAsync().GetAwaiter().GetResult();
+                                await FlushBatchAsync();
                             }
                         }
                     }

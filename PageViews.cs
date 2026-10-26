@@ -355,7 +355,7 @@ namespace GCStats
 
                                 if (idBuffer.Count >= Globals.RowGroupBatchSize)
                                 {
-                                    FlushBatchAsync().GetAwaiter().GetResult();
+                                    await FlushBatchAsync();
                                 }
                             }
                         }

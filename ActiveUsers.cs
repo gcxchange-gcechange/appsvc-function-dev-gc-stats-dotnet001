@@ -29,8 +29,6 @@ namespace GCStats
         [Function("ActiveUsers")]
         [QueueOutput("process-active-users", Connection = "AzureWebJobsStorage")]
         public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-        //[Function("ActiveUsers")]
-        //[QueueOutput("process-active-users", Connection = "AzureWebJobsStorage")]
         //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
             _logger.LogInformation($"Timer trigger function executed at: {DateTime.UtcNow}");
@@ -99,7 +97,7 @@ namespace GCStats
 
                     if (userIdBuffer.Count >= Globals.RowGroupBatchSize)
                     {
-                        FlushBatchAsync().GetAwaiter().GetResult();
+                        await FlushBatchAsync();
                     }
                 }
 
