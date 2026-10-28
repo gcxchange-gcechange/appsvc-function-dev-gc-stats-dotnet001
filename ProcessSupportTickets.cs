@@ -1,6 +1,7 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using Azure.Storage.Sas;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -15,6 +16,7 @@ namespace GCStats
     {
         private readonly ILogger<ProcessSupportTickets> _logger;
         private readonly IConfiguration _config;
+       
 
         public ProcessSupportTickets(ILogger<ProcessSupportTickets> logger, IConfiguration config)
         {
@@ -23,9 +25,11 @@ namespace GCStats
         }
 
         [Function("ProcessSupportTickets")]
-        public async Task Run([QueueTrigger("process-support-tickets", Connection = "AzureWebStorage")] string blobName)
+        public async Task Run([QueueTrigger("process-support-tickets", Connection = "AzureWebJobsStorage")] string blobName)
         {
+
             _logger.LogInformation("Received blobName: {blobName}", blobName);
+
             try
             {
                 var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", _logger, _config);
