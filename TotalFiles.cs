@@ -176,6 +176,7 @@ public class TotalFiles
 
                 pathBuffer.Clear();
                 fileNameBuffer.Clear();
+                fileExtensionBuffer.Clear();
                 titleBuffer.Clear();
                 spWebUrlBuffer.Clear();
                 spSiteUrlBuffer.Clear();
