@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -9,29 +8,34 @@ using Parquet.Schema;
 
 namespace GCStats;
 
-public class TotalFiles
+public class TotalFiles : IJob
 {
     private readonly ILogger<TotalFiles> _logger;
     private readonly IConfiguration _config;
+    private readonly JobQueue _queue;
 
+    public string Name => "TotalFiles";
     public const string FilesContainerName = "files";
 
-    public TotalFiles(ILogger<TotalFiles> logger, IConfiguration config)
+    public TotalFiles(ILogger<TotalFiles> logger, IConfiguration config, JobQueue queue)
     {
         _logger = logger;
         _config = config;
+        _queue = queue;
     }
 
-    [Function("TotalFiles")]
-    [QueueOutput("process-total-files", Connection = "AzureWebJobsStorage")]
-    public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-    //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+    [Function("Timer_TotalFiles")]
+    public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
+
+    public async Task RunAsync(CancellationToken ct)
     {
-        _logger.LogInformation("TotalFiles timer trigger executed at: {Time}", DateTime.UtcNow);
+        _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
         var blobName = await StreamTotalFilesToBlobAsync();
 
-        return blobName;
+        _logger.LogInformation($"BlobName: {blobName}");
+
+        await _queue.SendAsync("process-total-files", blobName);
     }
 
     public async Task<string> StreamTotalFilesToBlobAsync()

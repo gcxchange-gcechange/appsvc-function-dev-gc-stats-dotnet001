@@ -1,39 +1,41 @@
-using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Search.Query;
-using Microsoft.Kiota.Abstractions.Serialization;
 using Parquet;
 using Parquet.Schema;
-using System.Text.Json;
 
 namespace GCStats
 {
-    public class PageViews
+    public class PageViews : IJob
     {
         private readonly ILogger<PageViews> _logger;
         private readonly IConfiguration _config;
+        private readonly JobQueue _queue;
 
+        public string Name => "PageViews";
         public const string PageViewsContainerName = "page-views";
 
-        public PageViews(ILogger<PageViews> logger, IConfiguration config)
+        public PageViews(ILogger<PageViews> logger, IConfiguration config, JobQueue queue)
         {
             _logger = logger;
             _config = config;
+            _queue = queue;
         }
 
-        [Function("PageViews")]
-        [QueueOutput("process-page-views", Connection = "AzureWebJobsStorage")]
-        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
-        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        [Function("Timer_PageViews")]
+        public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
+
+        public async Task RunAsync(CancellationToken ct)
         {
-            _logger.LogInformation("PageViews timer trigger executed at: {Time}", DateTime.UtcNow);
+            _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
             var blobName = await StreamPageViewsToBlobAsync();
 
-            return blobName;
+            _logger.LogInformation($"BlobName: {blobName}");
+
+            await _queue.SendAsync("process-page-views", blobName);
         }
 
         public async Task<string> StreamPageViewsToBlobAsync()

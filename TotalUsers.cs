@@ -1,36 +1,36 @@
-using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace GCStats
 {
-    public class TotalUsers
+    public class TotalUsers : IJob
     {
         private readonly ILogger<TotalUsers> _logger;
+        private readonly IConfiguration _config;
+        private readonly JobQueue _queue;
 
-        public TotalUsers(ILogger<TotalUsers> logger)
+        public string Name => "TotalUsers";
+
+        public TotalUsers(ILogger<TotalUsers> logger, IConfiguration config, JobQueue queue)
         {
             _logger = logger;
+            _config = config;
+            _queue = queue;
         }
 
-        [Function("TotalUsers")]
-        [QueueOutput("process-total-users", Connection = "AzureWebJobsStorage")]
-        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        [Function("Timer_TotalUsers")]
+        public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
+
+        public async Task RunAsync(CancellationToken ct)
         {
-            _logger.LogInformation("TotalUsers timer trigger executed at: {Time}", DateTime.UtcNow);
+            _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
-            IConfiguration config = new ConfigurationBuilder()
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                .AddEnvironmentVariables()
-                .Build();
-
-            var blobName = await Users.StreamUsersToBlobAsync(_logger, config);
+            var blobName = await Users.StreamUsersToBlobAsync(_logger, _config);
 
             _logger.LogInformation($"BlobName: {blobName}");
 
-            return blobName;
+            await _queue.SendAsync("process-total-users", blobName);
         }
     }
 }
