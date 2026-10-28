@@ -40,7 +40,8 @@ namespace GCStats
         [Function("SupportTickets")]
         [QueueOutput("process-support-tickets", Connection = "AzureWebJobsStorage")]
 
-        public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req, List<JsonElement> tickets)
+        //public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
 
             _logger.LogInformation("Running Support Tickets");
@@ -65,7 +66,7 @@ namespace GCStats
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             // Define the fields for the parquet file
-            var idField = new DataField<int>("Id");
+            var ticketIdField = new DataField<int>("TicketId");
             var productIdField = new DataField<int?>("ProductId");
             var subjectField = new DataField<string?>("Subject");
             var statusField = new DataField<string?>("Status");
@@ -75,11 +76,11 @@ namespace GCStats
             var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
             // Create the schema
-            var ticketsSchema = new ParquetSchema(idField, productIdField, subjectField, statusField,  createdAtField, resolutionCodeField, subTypesField, snapshotDateField);
+            var ticketsSchema = new ParquetSchema(ticketIdField, productIdField, subjectField, statusField,  createdAtField, resolutionCodeField, subTypesField, snapshotDateField);
 
             //Create the buffers (rows)
 
-            var idFieldBuffer = new List<int?>(Globals.RowGroupBatchSize);
+            var ticketIdFieldBuffer = new List<int?>(Globals.RowGroupBatchSize);
             var productIdFieldBuffer = new List<int?>(Globals.RowGroupBatchSize);
             var subjectFieldBuffer = new List<string?>(Globals.RowGroupBatchSize);
             var statusFieldBuffer = new List<string?>(Globals.RowGroupBatchSize);
@@ -115,7 +116,7 @@ namespace GCStats
                 {
 
                     {
-                        idFieldBuffer.Add(item.GetProperty("id").GetInt32());
+                        ticketIdFieldBuffer.Add(item.GetProperty("id").GetInt32());
                         productIdFieldBuffer.Add(item.GetProperty("product_id").ValueKind == JsonValueKind.Null ? null : item.GetProperty("product_id").GetInt32());
                         subjectFieldBuffer.Add(item.GetProperty("subject").ValueKind == JsonValueKind.Null ? null : item.GetProperty("subject").ToString());
                         statusFieldBuffer.Add(item.GetProperty("status").ValueKind == JsonValueKind.Null ? null : item.GetProperty("status").ToString());
@@ -144,7 +145,7 @@ namespace GCStats
 
             using var ticketWriter = supporTicketsWriter.CreateRowGroup();
 
-            await ticketWriter.WriteAsync<int>(idField, idFieldBuffer.ToArray());
+            await ticketWriter.WriteAsync<int>(ticketIdField, ticketIdFieldBuffer.ToArray());
             await ticketWriter.WriteAsync<int>(productIdField, productIdFieldBuffer.ToArray());
             await ticketWriter.WriteAsync(subjectField, subjectFieldBuffer);
             await ticketWriter.WriteAsync(statusField, statusFieldBuffer);
@@ -152,6 +153,8 @@ namespace GCStats
             await ticketWriter.WriteAsync(resolutionCodeField, resolutionCodeFieldBuffer);
             await ticketWriter.WriteAsync(subTypesField, subTypesFieldBuffer);
             await ticketWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+
+            _logger.LogInformation("Created blob: {BlobName}", blobName);
 
             return blobName;
 
