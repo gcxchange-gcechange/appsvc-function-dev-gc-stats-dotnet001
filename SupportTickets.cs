@@ -41,8 +41,8 @@ namespace GCStats
         [Function("SupportTickets")]
         [QueueOutput("process-support-tickets", Connection = "AzureWebJobsStorage")]
 
-        //public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-        public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+       // public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
 
             _logger.LogInformation("Running Support Tickets");
