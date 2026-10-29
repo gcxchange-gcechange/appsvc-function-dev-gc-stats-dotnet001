@@ -1,10 +1,6 @@
 ﻿using Azure;
-using Azure.Identity;
 using Azure.Monitor.Query.Logs;
 using Azure.Monitor.Query.Logs.Models;
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -14,32 +10,33 @@ using Parquet.Schema;
 
 namespace GCStats
 {
-    public class ActiveUsers
+    public class ActiveUsers : IJob
     {
         private readonly ILogger<ActiveUsers> _logger;
         private readonly IConfiguration _config;
+        private readonly JobQueue _queue;
 
-        public ActiveUsers(ILogger<ActiveUsers> logger, IConfiguration config)
+        public string Name => "ActiveUsers";
+
+        public ActiveUsers(ILogger<ActiveUsers> logger, IConfiguration config, JobQueue queue)
         {
             _logger = logger;
             _config = config;
+            _queue = queue;
         }
 
-        
-        [Function("ActiveUsers")]
-        [QueueOutput("process-active-users", Connection = "AzureWebJobsStorage")]
-        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-        //[Function("ActiveUsers")]
-        //[QueueOutput("process-active-users", Connection = "AzureWebJobsStorage")]
-        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        [Function("Timer_ActiveUsers")]
+        public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
+
+        public async Task RunAsync(CancellationToken ct)
         {
-            _logger.LogInformation($"Timer trigger function executed at: {DateTime.UtcNow}");
+            _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
             var blobName = await StreamActiveUsersToBlobAsync();
 
             _logger.LogInformation($"BlobName: {blobName}");
 
-            return blobName;
+            await _queue.SendAsync("process-active-users", blobName);
         }
 
         public async Task<string> StreamActiveUsersToBlobAsync()
@@ -99,7 +96,7 @@ namespace GCStats
 
                     if (userIdBuffer.Count >= Globals.RowGroupBatchSize)
                     {
-                        FlushBatchAsync().GetAwaiter().GetResult();
+                        await FlushBatchAsync();
                     }
                 }
 

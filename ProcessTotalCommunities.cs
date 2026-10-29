@@ -63,8 +63,8 @@ namespace GCStats
 
                 using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
-                await CopyParquetIntoTableAsync(sqlConnection, "dbo.TotalCommunities", communitiesContainerClient, communitiesBlobClient, delegationKey.Value, blobServiceClient.AccountName);
-                _logger.LogInformation("Successfully uploaded communities from {blobName} to dbo.TotalCommunities", blobName);
+                await CopyParquetIntoTableAsync(sqlConnection, "dbo.Communities", communitiesContainerClient, communitiesBlobClient, delegationKey.Value, blobServiceClient.AccountName);
+                _logger.LogInformation("Successfully uploaded communities from {blobName} to dbo.Communities", blobName);
 
                 await CopyParquetIntoTableAsync(sqlConnection, "dbo.CommunityOwners", ownersContainerClient, ownersBlobClient, delegationKey.Value, blobServiceClient.AccountName);
                 _logger.LogInformation("Successfully uploaded owners from {blobName} to dbo.CommunityOwners", ownersBlobName);

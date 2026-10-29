@@ -16,11 +16,13 @@ using System.Globalization;
 
 namespace GCStats
 {
-    public class JobOpportunities
+    public class JobOpportunities : IJob
     {
         private readonly ILogger<JobOpportunities> _logger;
         private readonly IConfiguration _config;
+        private readonly JobQueue _queue;
 
+        public string Name => "JobOpportunities";
         public const string JobOpportunitiesContainerName = "job-opportunities";
         public const string JobOpportunitySkillsContainerName = "job-opportunity-skills";
         public const string JobOpportunityJobTypesContainerName = "job-opportunity-job-types";
@@ -28,22 +30,25 @@ namespace GCStats
         private record LookupValue(string Id, string? Title, string? ParentId);
         private string ProgramAreaColumnName = "Program_Area"; // TODO: Make this an app setting?
 
-        public JobOpportunities(ILogger<JobOpportunities> logger, IConfiguration config)
+        public JobOpportunities(ILogger<JobOpportunities> logger, IConfiguration config, JobQueue queue)
         {
             _logger = logger;
             _config = config;
+            _queue = queue;
         }
 
-        [Function("JobOpportunities")]
-        [QueueOutput("process-job-opportunities", Connection = "AzureWebJobsStorage")]
-        //public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
-        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
+        [Function("Timer_JobOpportunities")]
+        public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
+
+        public async Task RunAsync(CancellationToken ct)
         {
-            _logger.LogInformation("JobOpportunities timer trigger executed at: {Time}", DateTime.UtcNow);
+            _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
             var blobName = await StreamJobOpportunitiesToBlobAsync();
 
-            return blobName;
+            _logger.LogInformation($"BlobName: {blobName}");
+
+            await _queue.SendAsync("process-job-opportunities", blobName);
         }
 
         public async Task<string> StreamJobOpportunitiesToBlobAsync()
