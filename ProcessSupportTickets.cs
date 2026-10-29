@@ -70,6 +70,16 @@ namespace GCStats
                 using var copyCmd = new SqlCommand(
                     $"""
                      COPY INTO dbo.SupportTickets
+                     (
+                         TicketId,
+                         ProductId,
+                         Subject,
+                         Status,
+                         CreatedAt,
+                         ResolutionCode,
+                         SubTypes,
+                         SnapshotDate
+                     )
                      FROM '{blobUrl}'
                      WITH (
                          FILE_TYPE = 'PARQUET',
