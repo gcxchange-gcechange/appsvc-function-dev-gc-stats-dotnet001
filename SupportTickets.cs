@@ -45,8 +45,6 @@ namespace GCStats
        // public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
         {
 
-            _logger.LogInformation("Running Support Tickets");
-
             int page = 1;
             int perPage = 100;
            
@@ -103,9 +101,8 @@ namespace GCStats
             while (true)
             {
                 string url = $"{domain}per_page={perPage}&page={page}";
-                //string url = $"{domain} ";
-
-
+              
+  
                 //Get the data
                 HttpResponseMessage response = await client.GetAsync(url);
 
@@ -114,9 +111,7 @@ namespace GCStats
 
                 using JsonDocument doc = JsonDocument.Parse(responseBody);
                 int count = doc.RootElement.GetArrayLength();
-
-                _logger.LogInformation($"Response: {doc.RootElement}");
-                _logger.LogInformation($"Page {page}: {count} tickets");
+ 
 
                 // Stop when there are no more tickets
                 if (count == 0)
@@ -179,7 +174,6 @@ namespace GCStats
 
             }
 
-            _logger.LogInformation("Created blob: {BlobName}", blobName);
 
             return blobName;
 
