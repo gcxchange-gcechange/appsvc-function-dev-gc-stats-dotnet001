@@ -28,8 +28,6 @@ namespace GCStats
         public async Task Run([QueueTrigger("process-support-tickets", Connection = "AzureWebJobsStorage")] string blobName)
         {
 
-            _logger.LogInformation("Received blobName: {blobName}", blobName);
-
             try
             {
                 var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", _logger, _config);
@@ -92,14 +90,13 @@ namespace GCStats
                 copyCmd.CommandTimeout = 0;
                 await copyCmd.ExecuteNonQueryAsync();
 
-                _logger.LogInformation("Successfully uploaded users from {blobName} to dbo.SupportTickets", blobName);
 
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex.Message);
             }
-            _logger.LogInformation("Finished processing {blobName}", blobName);
+
         }
 
 
