@@ -11,6 +11,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Net.Http.Headers;
+using System.Numerics;
 using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -89,6 +90,16 @@ namespace GCStats
             var subTypesFieldBuffer = new List<string?>(Globals.RowGroupBatchSize);
             var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
+
+            var blobName = $"{TicketsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+
+            var blobClient = await Auth.GetBlobClient(TicketsContainerName, blobName, _logger, _config);
+
+
+            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+
+            await using var supporTicketsWriter = await ParquetWriter.CreateAsync(ticketsSchema, blobStream, Globals.ParquetOptions);
+
             while (true)
             {
                 string url = $"{domain}per_page={perPage}&page={page}";
@@ -126,33 +137,47 @@ namespace GCStats
                         snapshotDateBuffer.Add(snapshotDate);
                     }
 
-                }
+                    if (ticketIdFieldBuffer.Count >= Globals.RowGroupBatchSize)
+                    {
+                        await FlushBatchAsync();
+                    }
 
+                }
+                
 
                 page++;
             }
+            await FlushBatchAsync();
 
 
-         
-            var blobName = $"{TicketsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+            async Task FlushBatchAsync ()
 
-            var blobClient = await Auth.GetBlobClient(TicketsContainerName, blobName, _logger, _config);
+            {
 
+                if (ticketIdFieldBuffer.Count == 0)
+                    return;
 
-            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+                using var ticketWriter = supporTicketsWriter.CreateRowGroup();
 
-            await using var supporTicketsWriter = await ParquetWriter.CreateAsync(ticketsSchema, blobStream, Globals.ParquetOptions);
+                await ticketWriter.WriteAsync<int>(ticketIdField, ticketIdFieldBuffer.ToArray());
+                await ticketWriter.WriteAsync<int>(productIdField, productIdFieldBuffer.ToArray());
+                await ticketWriter.WriteAsync(subjectField, subjectFieldBuffer);
+                await ticketWriter.WriteAsync(statusField, statusFieldBuffer);
+                await ticketWriter.WriteAsync<DateTime>(createdAtField, createdAtFieldBuffer.ToArray().AsMemory());
+                await ticketWriter.WriteAsync(resolutionCodeField, resolutionCodeFieldBuffer);
+                await ticketWriter.WriteAsync(subTypesField, subTypesFieldBuffer);
+                await ticketWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
 
-            using var ticketWriter = supporTicketsWriter.CreateRowGroup();
+                ticketIdFieldBuffer.Clear();
+                productIdFieldBuffer.Clear();
+                subjectFieldBuffer.Clear();
+                statusFieldBuffer.Clear();
+                createdAtFieldBuffer.Clear();
+                resolutionCodeFieldBuffer.Clear();
+                subTypesFieldBuffer.Clear();
+                snapshotDateBuffer.Clear();
 
-            await ticketWriter.WriteAsync<int>(ticketIdField, ticketIdFieldBuffer.ToArray());
-            await ticketWriter.WriteAsync<int>(productIdField, productIdFieldBuffer.ToArray());
-            await ticketWriter.WriteAsync(subjectField, subjectFieldBuffer);
-            await ticketWriter.WriteAsync(statusField, statusFieldBuffer);
-            await ticketWriter.WriteAsync<DateTime>(createdAtField, createdAtFieldBuffer.ToArray().AsMemory());
-            await ticketWriter.WriteAsync(resolutionCodeField, resolutionCodeFieldBuffer);
-            await ticketWriter.WriteAsync(subTypesField, subTypesFieldBuffer);
-            await ticketWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+            }
 
             _logger.LogInformation("Created blob: {BlobName}", blobName);
 
