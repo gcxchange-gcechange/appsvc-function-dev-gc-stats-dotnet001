@@ -1,7 +1,6 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
 using GCStats.Models;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -44,30 +43,30 @@ namespace GCStats
         {
             _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
-            var blobName = await StreamJobOpportunitiesToBlobAsync();
+            var blobName = await StreamJobOpportunitiesToBlobAsync(ct);
 
             _logger.LogInformation($"BlobName: {blobName}");
 
             await _queue.SendAsync("process-job-opportunities", blobName);
         }
 
-        public async Task<string> StreamJobOpportunitiesToBlobAsync()
+        public async Task<string> StreamJobOpportunitiesToBlobAsync(CancellationToken ct = default)
         {
+            var blobNameJobOpportunities = $"{JobOpportunitiesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+            var blobNameSkills = $"{JobOpportunitySkillsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+            var blobNameJobTypes = $"{JobOpportunityJobTypesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+
             try
             {
                 var snapshotDate = DateTime.UtcNow.Date;
-
-                var blobNameJobOpportunities = $"{JobOpportunitiesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
-                var blobNameSkills = $"{JobOpportunitySkillsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
-                var blobNameJobTypes = $"{JobOpportunityJobTypesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 var blobClientJobOpp = await Auth.GetBlobClient(JobOpportunitiesContainerName, blobNameJobOpportunities, _logger, _config);
                 var blobClientSkills = await Auth.GetBlobClient(JobOpportunitySkillsContainerName, blobNameSkills, _logger, _config);
                 var blobClientJobType = await Auth.GetBlobClient(JobOpportunityJobTypesContainerName, blobNameJobTypes, _logger, _config);
 
-                using var blobStreamJobOpp = await blobClientJobOpp.OpenWriteAsync(overwrite: true);
-                using var blobStreamSkills = await blobClientSkills.OpenWriteAsync(overwrite: true);
-                using var blobStreamJobType = await blobClientJobType.OpenWriteAsync(overwrite: true);
+                using var blobStreamJobOpp = await blobClientJobOpp.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                using var blobStreamSkills = await blobClientSkills.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                using var blobStreamJobType = await blobClientJobType.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
                 // JobOpportunity fields
                 var idField = new DataField<int>("Id");
@@ -119,13 +118,13 @@ namespace GCStats
                     workscheduleIdField, workscheduleField, securityClearanceIdField, securityClearanceField, languageComprehensionField, languageRequirementIdField, languageRequirementField,
                     workArrangementIdField, workArrangementField, approvedStaffindField, cityIdField, cityField, regionIdField, regionField, provinceIdField, provinceField, programAreaIdField,
                     programAreaField, snapshotDateField);
-                await using var parquetWriterJobOpp = await ParquetWriter.CreateAsync(schemaJobOpp, blobStreamJobOpp, Globals.ParquetOptions);
+                await using var parquetWriterJobOpp = await ParquetWriter.CreateAsync(schemaJobOpp, blobStreamJobOpp, Globals.ParquetOptions, cancellationToken: ct);
 
                 var schemaSkills = new ParquetSchema(jobOpportunityIdField, skillIdField, titleField, snapshotDateField);
-                await using var parquetWriterSkills = await ParquetWriter.CreateAsync(schemaSkills, blobStreamSkills, Globals.ParquetOptions);
+                await using var parquetWriterSkills = await ParquetWriter.CreateAsync(schemaSkills, blobStreamSkills, Globals.ParquetOptions, cancellationToken: ct);
 
                 var schemaJobType = new ParquetSchema(jobOpportunityIdField, jobTypeIdField, titleField, snapshotDateField);
-                await using var parquetWriterJobType = await ParquetWriter.CreateAsync(schemaJobType, blobStreamJobType, Globals.ParquetOptions);
+                await using var parquetWriterJobType = await ParquetWriter.CreateAsync(schemaJobType, blobStreamJobType, Globals.ParquetOptions, cancellationToken: ct);
 
                 // JobOpportunity buffers
                 var idBuffer = new List<int>(Globals.RowGroupBatchSize);
@@ -168,48 +167,50 @@ namespace GCStats
 
                 async Task FlushJobOpportunityBatchAsync()
                 {
+                    ct.ThrowIfCancellationRequested();
+
                     if (idBuffer.Count == 0)
                         return;
 
                     using var groupWriter = parquetWriterJobOpp.CreateRowGroup();
 
-                    await groupWriter.WriteAsync<int>(idField, idBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewCountField, viewCountBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(applyCountField, applyCountBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(idField, idBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewCountField, viewCountBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(applyCountField, applyCountBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(authorMailField, authorMailBuffer);
-                    await groupWriter.WriteAsync<int>(departmentIdField, departmentIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(departmentIdField, departmentIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(departmentField, departmentBuffer);
                     await groupWriter.WriteAsync(titleEnField, titleEnBuffer);
-                    await groupWriter.WriteAsync<int>(classCodeIdField, classCodeIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(classCodeIdField, classCodeIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(classCodeField, classCodeBuffer);
-                    await groupWriter.WriteAsync<int>(classLevelIdField, classLevelIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(classLevelIdField, classLevelIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(classLevelField, classLevelBuffer);
-                    await groupWriter.WriteAsync<int>(numOpportunitiesField, numOpportunitiesBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(durationIdField, durationIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(numOpportunitiesField, numOpportunitiesBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(durationIdField, durationIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(durationField, durationBuffer);
-                    await groupWriter.WriteAsync<double>(durationQuantityField, durationQuantityBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<DateTime>(modificationDateField, modificationDateBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<DateTime>(applicationDeadlineDateField, applicationDeadlineDateBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(workscheduleIdField, workscheduleIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<double>(durationQuantityField, durationQuantityBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<DateTime>(modificationDateField, modificationDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<DateTime>(applicationDeadlineDateField, applicationDeadlineDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(workscheduleIdField, workscheduleIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(workscheduleField, workscheduleBuffer);
-                    await groupWriter.WriteAsync<int>(securityClearanceIdField, securityClearanceIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(securityClearanceIdField, securityClearanceIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(securityClearanceField, securityClearanceBuffer);
                     await groupWriter.WriteAsync(languageComprehensionField, languageComprehensionBuffer);
-                    await groupWriter.WriteAsync<int>(languageRequirementIdField, languageRequirementIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(languageRequirementIdField, languageRequirementIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(languageRequirementField, languageRequirementBuffer);
-                    await groupWriter.WriteAsync<int>(workArrangementIdField, workArrangementIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(workArrangementIdField, workArrangementIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(workArrangementField, workArrangementBuffer);
-                    await groupWriter.WriteAsync<bool>(approvedStaffindField, approvedStaffindBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(cityIdField, cityIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<bool>(approvedStaffindField, approvedStaffindBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(cityIdField, cityIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(cityField, cityBuffer);
-                    await groupWriter.WriteAsync<int>(regionIdField, regionIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(regionIdField, regionIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(regionField, regionBuffer);
-                    await groupWriter.WriteAsync<int>(provinceIdField, provinceIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(provinceIdField, provinceIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(provinceField, provinceBuffer);
                     await groupWriter.WriteAsync(programAreaIdField, programAreaIdBuffer);
                     await groupWriter.WriteAsync(programAreaField, programAreaBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                     idBuffer.Clear();
                     viewCountBuffer.Clear();
@@ -258,15 +259,17 @@ namespace GCStats
 
                 async Task FlushSkillsBatchAsync()
                 {
+                    ct.ThrowIfCancellationRequested();
+
                     if (jobOpportunityIdSkillsBuffer.Count == 0)
                         return;
 
                     using var groupWriter = parquetWriterSkills.CreateRowGroup();
 
-                    await groupWriter.WriteAsync<int>(jobOpportunityIdField, jobOpportunityIdSkillsBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(skillIdField, skillIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(jobOpportunityIdField, jobOpportunityIdSkillsBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(skillIdField, skillIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(titleField, titleSkillsBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateSkillsBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateSkillsBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                     jobOpportunityIdSkillsBuffer.Clear();
                     skillIdBuffer.Clear();
@@ -282,15 +285,17 @@ namespace GCStats
 
                 async Task FlushJobTypeBatchAsync()
                 {
+                    ct.ThrowIfCancellationRequested();
+
                     if (jobOpportunityIdJobTypeBuffer.Count == 0)
                         return;
 
                     using var groupWriter = parquetWriterJobType.CreateRowGroup();
 
-                    await groupWriter.WriteAsync<int>(jobOpportunityIdField, jobOpportunityIdJobTypeBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(jobOpportunityIdField, jobOpportunityIdJobTypeBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(jobTypeIdField, jobTypeIdBuffer);
                     await groupWriter.WriteAsync(titleField, titleJobTypeBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateJobTypeBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateJobTypeBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                     jobOpportunityIdJobTypeBuffer.Clear();
                     jobTypeIdBuffer.Clear();
@@ -304,23 +309,23 @@ namespace GCStats
                 var listIdJobOpp = Auth.GetAppSetting("cmJobOpportunityListId", _logger, _config);
 
                 // Cache the lookup lists
-                var departments = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmDepartmentListId", _logger, _config));
-                var classificationCodes = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmClassificationCodeListId", _logger, _config));
-                var classificationLevels = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmClassificationLevelListId", _logger, _config));
-                var durations = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmDurationListId", _logger, _config));
-                var workSchedules = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmWorkScheduleListId", _logger, _config));
-                var securityClearances = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSecurityClearanceListId", _logger, _config));
-                var languageRequirements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmLanguageRequirementListId", _logger, _config));
-                var workArrangements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmWorkArrangementListId", _logger, _config));
-                var cities = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmCityListId", _logger, _config), new[] { "NameEn", "TitleEn", "RegionLookupId" } );
-                var regions = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmRegionListId", _logger, _config), new[] { "NameEn", "TitleEn", "ProvinceLookupId" });
-                var provinces = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmProvinceListId", _logger, _config), new[] { "NameEn", "TitleEn" });
-                var skills = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSkillsListId", _logger, _config));
-                var programAreaByItem = await LoadProgramAreasAsync(graphClient, siteId, listIdJobOpp, ProgramAreaColumnName);
+                var departments = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmDepartmentListId", _logger, _config), ct: ct);
+                var classificationCodes = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmClassificationCodeListId", _logger, _config), ct: ct);
+                var classificationLevels = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmClassificationLevelListId", _logger, _config), ct: ct);
+                var durations = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmDurationListId", _logger, _config), ct: ct);
+                var workSchedules = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmWorkScheduleListId", _logger, _config), ct: ct);
+                var securityClearances = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSecurityClearanceListId", _logger, _config), ct: ct);
+                var languageRequirements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmLanguageRequirementListId", _logger, _config), ct: ct);
+                var workArrangements = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmWorkArrangementListId", _logger, _config), ct: ct);
+                var cities = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmCityListId", _logger, _config), new[] { "NameEn", "TitleEn", "RegionLookupId" }, ct: ct);
+                var regions = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmRegionListId", _logger, _config), new[] { "NameEn", "TitleEn", "ProvinceLookupId" }, ct: ct);
+                var provinces = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmProvinceListId", _logger, _config), new[] { "NameEn", "TitleEn" }, ct: ct);
+                var skills = await LoadLookupValuesAsync(graphClient, siteId, Auth.GetAppSetting("cmSkillsListId", _logger, _config), ct: ct);
+                var programAreaByItem = await LoadProgramAreasAsync(graphClient, siteId, listIdJobOpp, ProgramAreaColumnName, ct: ct);
 
                 // Cache the Google Analytics events
-                var viewEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ViewJobOpportunity.json", "stats");
-                var applyEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ApplyJobOpportunity.json", "stats");
+                var viewEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ViewJobOpportunity.json", "stats", ct: ct);
+                var applyEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ApplyJobOpportunity.json", "stats", ct: ct);
 
                 // IMPORTANT: Confirm these are named the same for your environment
                 var selectColumns = new[]
@@ -352,7 +357,7 @@ namespace GCStats
                 {
                     rc.QueryParameters.Expand = new[] { $"fields($select={string.Join(",", selectColumns)})" };
                     //rc.QueryParameters.Expand = new[] { "fields" };
-                });
+                }, ct);
 
                 var countJobOpp = 0;
                 var countSkills = 0;
@@ -364,6 +369,8 @@ namespace GCStats
                         jobOpportunityPage!,
                         jobOpportunity =>
                         {
+                            ct.ThrowIfCancellationRequested();
+
                             var fields = jobOpportunity.Fields?.AdditionalData;
                             if (jobOpportunity.Id != null && fields != null)
                             {
@@ -393,7 +400,7 @@ namespace GCStats
                                 numOpportunitiesBuffer.Add(Convert.ToInt32(Convert.ToDouble(Globals.GetField(fields, "NumberOfOpportunities"))));
 
                                 var durationId = Globals.GetFieldOrNull(fields, "DurationLookupId");
-                                durationIdBuffer.Add(Convert.ToInt32(durationId));
+                                durationIdBuffer.Add(durationId != null ? Convert.ToInt32(durationId) : (int?)null);
                                 durationBuffer.Add(durationId != null ? durations.Where(item => item.Id == durationId).FirstOrDefault()?.Title! : null);
 
                                 durationQuantityBuffer.Add(Convert.ToDouble(Globals.GetField(fields, "DurationQuantity")));
@@ -422,15 +429,15 @@ namespace GCStats
                                 approvedStaffindBuffer.Add(Convert.ToBoolean(Globals.GetField(fields, "ApprovedStaffing")));
 
                                 var cityId = Globals.GetFieldOrNull(fields, "CityLookupId");
-                                cityIdBuffer.Add(Convert.ToInt32(cityId));
+                                cityIdBuffer.Add(cityId != null ? Convert.ToInt32(cityId) : (int?)null);
                                 cityBuffer.Add(cityId != null ? cities.Where(item => item.Id == cityId).FirstOrDefault()?.Title : null);
 
                                 var regionId = cityId != null ? cities.Where(city => city.Id == cityId).FirstOrDefault()?.ParentId : null;
-                                regionIdBuffer.Add(Convert.ToInt32(regionId));
+                                regionIdBuffer.Add(regionId != null ? Convert.ToInt32(regionId) : (int?)null);
                                 regionBuffer.Add(regionId != null ? regions.Where(item => item.Id == regionId).FirstOrDefault()?.Title : null);
 
                                 var provinceId = regionId != null ? regions.Where(region => region.Id == regionId).FirstOrDefault()?.ParentId : null;
-                                provinceIdBuffer.Add(Convert.ToInt32(provinceId));
+                                provinceIdBuffer.Add(provinceId != null ? Convert.ToInt32(provinceId) : (int?)null);
                                 provinceBuffer.Add(provinceId != null ? provinces.Where(item => item.Id == provinceId).FirstOrDefault()?.Title : null);
 
                                 programAreaByItem.TryGetValue(jobOpportunity.Id, out var pa);
@@ -539,7 +546,7 @@ namespace GCStats
                             return true;
                         });
 
-                await pageIterator.IterateAsync();
+                await pageIterator.IterateAsync(ct);
 
                 await FlushJobOpportunityBatchAsync();
                 await FlushSkillsBatchAsync();
@@ -550,27 +557,42 @@ namespace GCStats
                 await parquetWriterJobType.DisposeAsync();
 
                 _logger.LogInformation($"Streamed {countJobOpp} job opportunities to {blobNameJobOpportunities}");
-                _logger.LogInformation($"Streamed {countSkills} job opportunities to {blobNameSkills}");
-                _logger.LogInformation($"Streamed {countJobType} job opportunities to {blobNameJobTypes}");
+                _logger.LogInformation($"Streamed {countSkills} skills to {blobNameSkills}");
+                _logger.LogInformation($"Streamed {countJobType} job types to {blobNameJobTypes}");
 
                 return blobNameJobOpportunities;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("StreamJobOpportunitiesToBlobAsync was cancelled");
+
+                await Globals.DeletePartialBlob(JobOpportunitiesContainerName, blobNameJobOpportunities, _logger, _config);
+                await Globals.DeletePartialBlob(JobOpportunitySkillsContainerName, blobNameSkills, _logger, _config);
+                await Globals.DeletePartialBlob(JobOpportunityJobTypesContainerName, blobNameJobTypes, _logger, _config);
+
+                throw;
             }
             catch (Exception ex)
             {
                 _logger.LogError("StreamJobOpportunitiesToBlobAsync failed");
                 _logger.LogError(ex.Message);
+
+                await Globals.DeletePartialBlob(JobOpportunitiesContainerName, blobNameJobOpportunities, _logger, _config);
+                await Globals.DeletePartialBlob(JobOpportunitySkillsContainerName, blobNameSkills, _logger, _config);
+                await Globals.DeletePartialBlob(JobOpportunityJobTypesContainerName, blobNameJobTypes, _logger, _config);
+
                 throw;
             }
         }
 
-        private async Task<List<LookupValue>> LoadLookupValuesAsync(GraphServiceClient graphClient, string siteId, string listId, string[]? selectColumns = null)
+        private async Task<List<LookupValue>> LoadLookupValuesAsync(GraphServiceClient graphClient, string siteId, string listId, string[]? selectColumns = null, CancellationToken ct = default)
         {
             var values = new List<LookupValue>();
-
+            
             var response = await graphClient.Sites[siteId].Lists[listId].Items.GetAsync(rc =>
             {
                 rc.QueryParameters.Expand = selectColumns == null || selectColumns.Length == 0 ? ["fields"] : [$"fields($select={string.Join(",", selectColumns)})"];
-            });
+            }, ct);
 
             if (response == null)
                 return values;
@@ -609,14 +631,14 @@ namespace GCStats
                         return true;
                     });
 
-            await pageIterator.IterateAsync();
+            await pageIterator.IterateAsync(ct);
 
             return values;
         }
 
         // For some reason the Program Area column is the only column that DOES NOT load when we get the items from the list... so we have to load them all first
         private async Task<ConcurrentDictionary<string, (string? TermId, string? Label)>> LoadProgramAreasAsync(
-    GraphServiceClient graphClient, string siteId, string listId, string columnName)
+    GraphServiceClient graphClient, string siteId, string listId, string columnName, CancellationToken ct = default)
         {
             var result = new ConcurrentDictionary<string, (string?, string?)>();
 
@@ -626,7 +648,7 @@ namespace GCStats
             {
                 rc.QueryParameters.Select = new[] { "id" };
                 rc.QueryParameters.Top = 999;
-            });
+            }, ct);
 
             if (page == null) return result;
 
@@ -636,17 +658,21 @@ namespace GCStats
                     if (item.Id != null) ids.Add(item.Id);
                     return true;
                 });
-            await idIterator.IterateAsync();
+            await idIterator.IterateAsync(ct);
 
             // 2. Fetch each item's fields, a few at a time
             using var gate = new SemaphoreSlim(8);
 
             var tasks = ids.Select(async id =>
             {
-                await gate.WaitAsync();
+                await gate.WaitAsync(ct);
                 try
                 {
-                    var f = await graphClient.Sites[siteId].Lists[listId].Items[id].Fields.GetAsync();
+                    var f = await graphClient.Sites[siteId].Lists[listId].Items[id].Fields.GetAsync(rc =>
+                    {
+                        rc.QueryParameters.Select = new[] { columnName };
+                    }, ct);
+
                     if (f?.AdditionalData == null ||
                         !f.AdditionalData.TryGetValue(columnName, out var raw) || raw == null)
                         return;
@@ -676,7 +702,7 @@ namespace GCStats
             return result;
         }
 
-        private async Task<List<GoogleAnalyticsEvent>> GetGoogleAnalyticsEvents(string blobName, string containerName)
+        private async Task<List<GoogleAnalyticsEvent>> GetGoogleAnalyticsEvents(string blobName, string containerName, CancellationToken ct = default)
         {
             try
             {
@@ -688,10 +714,10 @@ namespace GCStats
                 var containerClient = blobServiceClient.GetBlobContainerClient(containerName);
                 var blobClient = containerClient.GetBlobClient(blobName);
 
-                if (!await blobClient.ExistsAsync())
+                if (!await blobClient.ExistsAsync(ct))
                     throw new FileNotFoundException($"Blob {blobName} not found in container {containerName}");
 
-                var response = await blobClient.DownloadContentAsync();
+                var response = await blobClient.DownloadContentAsync(ct);
                 var json = response.Value.Content.ToString();
 
                 var events = JsonConvert.DeserializeObject<List<GoogleAnalyticsEvent>>(json);
