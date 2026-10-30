@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using Parquet;
 using Parquet.Schema;
 using System;
+using System.Collections;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Net.Http.Headers;
@@ -20,29 +21,45 @@ using System.Xml.Linq;
 
 namespace GCStats
 {
-    public class SupportTickets
+    public class SupportTickets : IJob
     {
         private readonly ILogger<SupportTickets> _logger;
         private readonly IConfiguration _config;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly JobQueue _queue;
+
+        public string Name => "SupportTickets";
 
         public const string TicketsContainerName = "tickets";
 
-        public SupportTickets(ILogger<SupportTickets> logger, IConfiguration config, IHttpClientFactory httpClientFactory)
+        public SupportTickets(ILogger<SupportTickets> logger, IConfiguration config, IHttpClientFactory httpClientFactory, JobQueue queue)
         {
             _logger = logger;
             _config = config;
             _httpClientFactory = httpClientFactory;
+            _queue = queue;
 
 
         }
 
 
-        [Function("SupportTickets")]
-        [QueueOutput("process-support-tickets", Connection = "AzureWebJobsStorage")]
+        [Function("Timer_SupportTickets")]
 
-        public async Task<string> Run([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer)
-       // public async Task<string> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+        public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
+
+        public async Task RunAsync(CancellationToken ct)
+        {
+            _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
+
+            var blobName = await StreamSupportTicketsToBlobAsync(ct);
+
+            _logger.LogInformation($"BlobName: {blobName}");    
+
+            await _queue.SendAsync("process-support-tickets", blobName);
+        }
+
+
+        public async Task<string> StreamSupportTicketsToBlobAsync(CancellationToken ct)
         {
 
             int page = 1;
@@ -79,7 +96,7 @@ namespace GCStats
 
             //Create the buffers (rows)
 
-            var ticketIdFieldBuffer = new List<int?>(Globals.RowGroupBatchSize);
+            var ticketIdFieldBuffer = new List<int>(Globals.RowGroupBatchSize);
             var productIdFieldBuffer = new List<int?>(Globals.RowGroupBatchSize);
             var subjectFieldBuffer = new List<string?>(Globals.RowGroupBatchSize);
             var statusFieldBuffer = new List<string?>(Globals.RowGroupBatchSize);
@@ -104,9 +121,9 @@ namespace GCStats
               
   
                 //Get the data
-                HttpResponseMessage response = await client.GetAsync(url);
+                HttpResponseMessage response = await client.GetAsync(url, ct);
 
-                string responseBody = await response.Content.ReadAsStringAsync();
+                string responseBody = await response.Content.ReadAsStringAsync(ct);
                 response.EnsureSuccessStatusCode();
 
                 using JsonDocument doc = JsonDocument.Parse(responseBody);

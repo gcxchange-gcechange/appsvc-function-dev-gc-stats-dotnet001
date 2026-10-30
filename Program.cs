@@ -46,5 +46,6 @@ builder.Services.AddSingleton<IJob, TotalCommunities>();
 builder.Services.AddSingleton<IJob, TotalFiles>();
 builder.Services.AddSingleton<IJob, PageViews>();
 builder.Services.AddSingleton<IJob, JobOpportunities>();
+builder.Services.AddSingleton<IJob, SupportTickets>();
 
 builder.Build().Run();
