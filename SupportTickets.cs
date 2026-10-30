@@ -43,7 +43,7 @@ namespace GCStats
         }
 
 
-        [Function("SupportTickets")]
+        [Function("Timer_SupportTickets")]
 
         public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
 
