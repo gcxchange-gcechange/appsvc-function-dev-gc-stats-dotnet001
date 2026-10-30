@@ -32,19 +32,20 @@ namespace GCStats
         {
             _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
-            var blobName = await StreamActiveUsersToBlobAsync();
+            var blobName = await StreamActiveUsersToBlobAsync(ct);
 
             _logger.LogInformation($"BlobName: {blobName}");
 
             await _queue.SendAsync("process-active-users", blobName);
         }
 
-        public async Task<string> StreamActiveUsersToBlobAsync()
+        public async Task<string> StreamActiveUsersToBlobAsync(CancellationToken ct = default)
         {
+            var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+
             try
             {
                 var snapshotDate = DateTime.UtcNow.Date;
-                var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 var blobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, blobName, _logger, _config);
                 var logsQueryClient = Auth.GetLogsQueryClient(_logger);
@@ -62,28 +63,31 @@ namespace GCStats
                 Response<LogsQueryResult> response = await logsQueryClient.QueryWorkspaceAsync(
                     workspaceId: Auth.GetAppSetting("workspaceId", _logger, _config),
                     query: query,
-                    timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24))
+                    timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24)),
+                    cancellationToken: ct
                 );
 
                 var userIdField = new DataField<string>("UserId");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
                 var schema = new ParquetSchema(userIdField, snapshotDateField);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
 
                 var userIdBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
                 async Task FlushBatchAsync()
                 {
+                    ct.ThrowIfCancellationRequested();
+
                     if (userIdBuffer.Count == 0)
                         return;
 
                     using var groupWriter = parquetWriter.CreateRowGroup();
 
                     await groupWriter.WriteAsync(userIdField, userIdBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                     userIdBuffer.Clear();
                     snapshotDateBuffer.Clear();
@@ -107,9 +111,18 @@ namespace GCStats
 
                 return blobName;
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("StreamActiveUsersToBlobAsync was cancelled");
+
+                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, blobName, _logger, _config);
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex.Message);
+
+                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, blobName, _logger, _config);
                 throw;
             }
         }

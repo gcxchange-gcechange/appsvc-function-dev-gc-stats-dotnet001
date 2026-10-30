@@ -31,24 +31,25 @@ public class TotalFiles : IJob
     {
         _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
-        var blobName = await StreamTotalFilesToBlobAsync();
+        var blobName = await StreamTotalFilesToBlobAsync(ct);
 
         _logger.LogInformation($"BlobName: {blobName}");
 
         await _queue.SendAsync("process-total-files", blobName);
     }
 
-    public async Task<string> StreamTotalFilesToBlobAsync()
+    public async Task<string> StreamTotalFilesToBlobAsync(CancellationToken ct = default)
     {
+        var blobName = $"{FilesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+
         try
         {
             var snapshotDate = DateTime.UtcNow.Date;
-            var blobName = $"{FilesContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
             var graphClient = Auth.GetGraphServiceClient(_logger);
             var blobClient = await Auth.GetBlobClient(FilesContainerName, blobName, _logger, _config);
 
-            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
             var idField = new DataField<string>("Id");
             var siteIdField = new DataField<string>("SiteId");
@@ -86,12 +87,12 @@ public class TotalFiles : IJob
 
             var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
-            var schema = new ParquetSchema(idField, siteIdField, webIdField, listIdField, listItemIdField, pathField, fileNameField, fileExtensionField, titleField, 
-                spWebUrlField, spSiteUrlField, siteTitleField, createdField, lastModifiedTimeField, authorField, editorField, viewsLifeTimeField, 
-                viewsLifeTimeUniqueField, viewsLast1DaysField, viewsLast2DaysField, viewsLast3DaysField, viewsLast4DaysField, viewsLast5DaysField, 
-                viewsLast6DaysField,viewsLast7DaysField, viewsLastMonths1Field, viewsLastMonths2Field, viewsLastMonths3Field, snapshotDateField);
+            var schema = new ParquetSchema(idField, siteIdField, webIdField, listIdField, listItemIdField, pathField, fileNameField, fileExtensionField, titleField,
+                spWebUrlField, spSiteUrlField, siteTitleField, createdField, lastModifiedTimeField, authorField, editorField, viewsLifeTimeField,
+                viewsLifeTimeUniqueField, viewsLast1DaysField, viewsLast2DaysField, viewsLast3DaysField, viewsLast4DaysField, viewsLast5DaysField,
+                viewsLast6DaysField, viewsLast7DaysField, viewsLastMonths1Field, viewsLastMonths2Field, viewsLastMonths3Field, snapshotDateField);
 
-            await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
+            await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
 
             var idBuffer = new List<string>(Globals.RowGroupBatchSize);
             var siteIdBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -131,6 +132,8 @@ public class TotalFiles : IJob
 
             async Task FlushBatchAsync()
             {
+                ct.ThrowIfCancellationRequested();
+
                 if (idBuffer.Count == 0)
                     return;
 
@@ -140,7 +143,7 @@ public class TotalFiles : IJob
                 await groupWriter.WriteAsync(siteIdField, siteIdBuffer);
                 await groupWriter.WriteAsync(webIdField, webIdBuffer);
                 await groupWriter.WriteAsync(listIdField, listIdBuffer);
-                await groupWriter.WriteAsync<int>(listItemIdField, listItemIdBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(listItemIdField, listItemIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                 await groupWriter.WriteAsync(pathField, pathBuffer);
                 await groupWriter.WriteAsync(fileNameField, fileNameBuffer);
@@ -150,27 +153,27 @@ public class TotalFiles : IJob
                 await groupWriter.WriteAsync(spSiteUrlField, spSiteUrlBuffer);
                 await groupWriter.WriteAsync(siteTitleField, siteTitleBuffer);
 
-                await groupWriter.WriteAsync<DateTime>(createdField, createdBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<DateTime>(lastModifiedTimeField, lastModifiedTimeBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<DateTime>(createdField, createdBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<DateTime>(lastModifiedTimeField, lastModifiedTimeBuffer.ToArray().AsMemory(), cancellationToken: ct);
                 await groupWriter.WriteAsync(authorField, authorBuffer);
                 await groupWriter.WriteAsync(editorField, editorBuffer);
 
-                await groupWriter.WriteAsync<int>(viewsLifeTimeField, viewsLifeTimeBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLifeTimeUniqueField, viewsLifeTimeUniqueUsersBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLifeTimeField, viewsLifeTimeBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLifeTimeUniqueField, viewsLifeTimeUniqueUsersBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                await groupWriter.WriteAsync<int>(viewsLast1DaysField, viewsLast1DaysBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLast2DaysField, viewsLast2DaysBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLast3DaysField, viewsLast3DaysBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLast4DaysField, viewsLast4DaysBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLast5DaysField, viewsLast5DaysBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLast6DaysField, viewsLast6DaysBuffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLast7DaysField, viewsLast7DaysBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLast1DaysField, viewsLast1DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLast2DaysField, viewsLast2DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLast3DaysField, viewsLast3DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLast4DaysField, viewsLast4DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLast5DaysField, viewsLast5DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLast6DaysField, viewsLast6DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLast7DaysField, viewsLast7DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                await groupWriter.WriteAsync<int>(viewsLastMonths1Field, ViewsLastMonths1Buffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLastMonths2Field, ViewsLastMonths2Buffer.ToArray().AsMemory());
-                await groupWriter.WriteAsync<int>(viewsLastMonths3Field, ViewsLastMonths3Buffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<int>(viewsLastMonths1Field, ViewsLastMonths1Buffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLastMonths2Field, ViewsLastMonths2Buffer.ToArray().AsMemory(), cancellationToken: ct);
+                await groupWriter.WriteAsync<int>(viewsLastMonths3Field, ViewsLastMonths3Buffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+                await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                 idBuffer.Clear();
                 siteIdBuffer.Clear();
@@ -228,6 +231,8 @@ public class TotalFiles : IJob
 
             foreach (var (monthStart, monthEnd) in monthRanges)
             {
+                ct.ThrowIfCancellationRequested();
+
                 int from = 0;
                 long total = 0;
                 bool moreResultsAvailable;
@@ -239,6 +244,8 @@ public class TotalFiles : IJob
 
                 do
                 {
+                    ct.ThrowIfCancellationRequested();
+
                     var searchResponse = await graphClient.Search.Query.PostAsQueryPostResponseAsync(
                         new QueryPostRequestBody
                         {
@@ -295,7 +302,8 @@ public class TotalFiles : IJob
                                     }
                                 }
                             }
-                        }
+                        },
+                        cancellationToken: ct
                     );
 
                     var container = searchResponse?.Value?.FirstOrDefault()?.HitsContainers?.FirstOrDefault();
@@ -307,6 +315,8 @@ public class TotalFiles : IJob
 
                     foreach (var hit in hits)
                     {
+                        ct.ThrowIfCancellationRequested();
+
                         var listItem = hit.Resource as ListItem;
 
                         if (listItem != null && listItem.Fields != null && listItem.Fields.AdditionalData != null)
@@ -371,9 +381,16 @@ public class TotalFiles : IJob
 
             return blobName;
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("StreamTotalFilesToBlobAsync was cancelled");
+            await Globals.DeletePartialBlob(FilesContainerName, blobName, _logger, _config);
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex.Message);
+            _logger.LogError(ex, "StreamTotalFilesToBlobAsync failed");
+            await Globals.DeletePartialBlob(FilesContainerName, blobName, _logger, _config);
             throw;
         }
     }

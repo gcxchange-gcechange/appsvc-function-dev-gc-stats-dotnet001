@@ -16,7 +16,7 @@ namespace GCStats
         public const string TotalUsersContainerName = "users";
         public const string ActiveUsersContainerName = "active-users";
 
-        public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
+        public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config, CancellationToken ct = default)
         {
             try
             {
@@ -24,7 +24,7 @@ namespace GCStats
                 var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
                 var blobClient = await Auth.GetBlobClient(TotalUsersContainerName, blobName, log, config);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
                 var idField = new DataField<string>("Id");
                 var mailField = new DataField<string?>("Mail");
@@ -35,7 +35,7 @@ namespace GCStats
 
                 var schema = new ParquetSchema(idField, mailField, domainField, upnField, createdDateTimeField, snapshotDateField);
 
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
+                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
 
                 var graph = Auth.GetGraphServiceClient(log);
                 int count = 0;
@@ -49,7 +49,9 @@ namespace GCStats
 
                 async Task FlushBatchAsync()
                 {
-                    if (idBuffer.Count == 0) 
+                    ct.ThrowIfCancellationRequested();
+
+                    if (idBuffer.Count == 0)
                         return;
 
                     using var groupWriter = parquetWriter.CreateRowGroup();
@@ -58,8 +60,8 @@ namespace GCStats
                     await groupWriter.WriteAsync(mailField, mailBuffer);
                     await groupWriter.WriteAsync(domainField, domainBuffer);
                     await groupWriter.WriteAsync(upnField, upnBuffer);
-                    await groupWriter.WriteAsync<DateTime>(createdDateTimeField, createdDateTimeBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(createdDateTimeField, createdDateTimeBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                     idBuffer.Clear();
                     mailBuffer.Clear();
@@ -74,21 +76,26 @@ namespace GCStats
                     requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
                     requestConfiguration.QueryParameters.Top = 999;
                     requestConfiguration.QueryParameters.Select = [
-                        "Id", 
-                        "Mail", 
-                        "UserPrincipalName", 
-                        "CreatedDateTime", 
+                        "Id",
+                        "Mail",
+                        "UserPrincipalName",
+                        "CreatedDateTime",
                     ];
-                });
+                }, ct);
+
+                if (usersPage is null)
+                    throw new InvalidOperationException("Graph returned no users page; refusing to write an empty snapshot.");
 
                 var exceptionUsersArray = Auth.GetAppSetting("exceptionUsersArray", log, config);
 
                 var pageIterator = PageIterator<User, UserCollectionResponse>
                     .CreatePageIterator(
                         graph,
-                        usersPage!,
-                        user =>
+                        usersPage,
+                        async user =>
                         {
+                            ct.ThrowIfCancellationRequested();
+
                             if (user.Id != null && !exceptionUsersArray.Contains(user.Id))
                             {
                                 idBuffer.Add(user.Id);
@@ -100,9 +107,7 @@ namespace GCStats
                                 count++;
 
                                 if (idBuffer.Count >= Globals.RowGroupBatchSize)
-                                {
-                                    FlushBatchAsync().GetAwaiter().GetResult();
-                                }
+                                    await FlushBatchAsync();
                             }
 
                             return true;
@@ -113,7 +118,7 @@ namespace GCStats
                             return requestConfiguration;
                         });
 
-                await pageIterator.IterateAsync();
+                await pageIterator.IterateAsync(ct);
                 await FlushBatchAsync();
                 await parquetWriter.DisposeAsync();
 
@@ -121,10 +126,14 @@ namespace GCStats
 
                 return blobName;
             }
+            catch (OperationCanceledException)
+            {
+                log.LogWarning("StreamUsersToBlobAsync was cancelled");
+                throw;
+            }
             catch (Exception ex)
             {
-                log.LogError("StreamUsersToBlobAsync failed");
-                log.LogError(ex.Message);
+                log.LogError(ex, "StreamUsersToBlobAsync failed");
                 throw;
             }
         }
@@ -157,7 +166,7 @@ namespace GCStats
 
             var extIndex = upn.IndexOf("#EXT#", StringComparison.OrdinalIgnoreCase);
             if (extIndex < 0)
-                return null; 
+                return null;
 
             var beforeExt = upn.Substring(0, extIndex);
             var underscore = beforeExt.LastIndexOf('_');

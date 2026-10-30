@@ -31,24 +31,25 @@ namespace GCStats
         {
             _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
-            var blobName = await StreamPageViewsToBlobAsync();
+            var blobName = await StreamPageViewsToBlobAsync(ct);
 
             _logger.LogInformation($"BlobName: {blobName}");
 
-            await _queue.SendAsync("process-page-views", blobName);
+            await _queue.SendAsync("process-page-views", blobName); // add ct here if JobQueue supports it
         }
 
-        public async Task<string> StreamPageViewsToBlobAsync()
+        public async Task<string> StreamPageViewsToBlobAsync(CancellationToken ct = default)
         {
+            var blobName = $"{PageViewsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+
             try
             {
                 var snapshotDate = DateTime.UtcNow.Date;
-                var blobName = $"{PageViewsContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
                 var graphClient = Auth.GetGraphServiceClient(_logger);
                 var blobClient = await Auth.GetBlobClient(PageViewsContainerName, blobName, _logger, _config);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
+                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
                 var idField = new DataField<string>("Id");
                 var siteIdField = new DataField<string>("SiteId");
@@ -88,11 +89,11 @@ namespace GCStats
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
                 var schema = new ParquetSchema(idField, siteIdField, webIdField, listIdField, listItemIdField, pathField, fileNameField, titleField, spWebUrlField,
-                    spSiteUrlField, siteTitleField, promotedStateField, createdField, lastModifiedTimeField, authorField, editorField, languageField, viewsLifeTimeField, 
-                    viewsLifeTimeUniqueField, viewsLast1DaysField, viewsLast2DaysField, viewsLast3DaysField, viewsLast4DaysField, viewsLast5DaysField, viewsLast6DaysField, 
+                    spSiteUrlField, siteTitleField, promotedStateField, createdField, lastModifiedTimeField, authorField, editorField, languageField, viewsLifeTimeField,
+                    viewsLifeTimeUniqueField, viewsLast1DaysField, viewsLast2DaysField, viewsLast3DaysField, viewsLast4DaysField, viewsLast5DaysField, viewsLast6DaysField,
                     viewsLast7DaysField, viewsLastMonths1Field, viewsLastMonths2Field, viewsLastMonths3Field, snapshotDateField);
 
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
+                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
 
                 var idBuffer = new List<string>(Globals.RowGroupBatchSize);
                 var siteIdBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -133,6 +134,8 @@ namespace GCStats
 
                 async Task FlushBatchAsync()
                 {
+                    ct.ThrowIfCancellationRequested();
+
                     if (idBuffer.Count == 0)
                         return;
 
@@ -142,7 +145,7 @@ namespace GCStats
                     await groupWriter.WriteAsync(siteIdField, siteIdBuffer);
                     await groupWriter.WriteAsync(webIdField, webIdBuffer);
                     await groupWriter.WriteAsync(listIdField, listIdBuffer);
-                    await groupWriter.WriteAsync<int>(listItemIdField, listItemIdBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(listItemIdField, listItemIdBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                     await groupWriter.WriteAsync(pathField, pathBuffer);
                     await groupWriter.WriteAsync(fileNameField, fileNameBuffer);
@@ -150,30 +153,30 @@ namespace GCStats
                     await groupWriter.WriteAsync(spWebUrlField, spWebUrlBuffer);
                     await groupWriter.WriteAsync(spSiteUrlField, spSiteUrlBuffer);
                     await groupWriter.WriteAsync(siteTitleField, siteTitleBuffer);
-                    await groupWriter.WriteAsync<int>(promotedStateField, promotedStateBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(promotedStateField, promotedStateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                    await groupWriter.WriteAsync<DateTime>(createdField, createdBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<DateTime>(lastModifiedTimeField, lastModifiedTimeBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(createdField, createdBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<DateTime>(lastModifiedTimeField, lastModifiedTimeBuffer.ToArray().AsMemory(), cancellationToken: ct);
                     await groupWriter.WriteAsync(authorField, authorBuffer);
                     await groupWriter.WriteAsync(editorField, editorBuffer);
                     await groupWriter.WriteAsync(languageField, languageBuffer);
 
-                    await groupWriter.WriteAsync<int>(viewsLifeTimeField, viewsLifeTimeBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLifeTimeUniqueField, viewsLifeTimeUniqueUsersBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(viewsLifeTimeField, viewsLifeTimeBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLifeTimeUniqueField, viewsLifeTimeUniqueUsersBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                    await groupWriter.WriteAsync<int>(viewsLast1DaysField, viewsLast1DaysBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLast2DaysField, viewsLast2DaysBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLast3DaysField, viewsLast3DaysBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLast4DaysField, viewsLast4DaysBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLast5DaysField, viewsLast5DaysBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLast6DaysField, viewsLast6DaysBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLast7DaysField, viewsLast7DaysBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(viewsLast1DaysField, viewsLast1DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLast2DaysField, viewsLast2DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLast3DaysField, viewsLast3DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLast4DaysField, viewsLast4DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLast5DaysField, viewsLast5DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLast6DaysField, viewsLast6DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLast7DaysField, viewsLast7DaysBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                    await groupWriter.WriteAsync<int>(viewsLastMonths1Field, ViewsLastMonths1Buffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLastMonths2Field, ViewsLastMonths2Buffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<int>(viewsLastMonths3Field, ViewsLastMonths3Buffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<int>(viewsLastMonths1Field, ViewsLastMonths1Buffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLastMonths2Field, ViewsLastMonths2Buffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await groupWriter.WriteAsync<int>(viewsLastMonths3Field, ViewsLastMonths3Buffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
                     idBuffer.Clear();
                     siteIdBuffer.Clear();
@@ -232,75 +235,80 @@ namespace GCStats
 
                 foreach (var (monthStart, monthEnd) in monthRanges)
                 {
+                    ct.ThrowIfCancellationRequested();
+
                     int from = 0;
                     long total = 0;
                     bool moreResultsAvailable;
 
                     var startCreation = monthStart.ToString("yyyy-MM-ddTHH:mm:ss");
-                    var endCreation= monthEnd.ToString("yyyy-MM-ddTHH:mm:ss");
+                    var endCreation = monthEnd.ToString("yyyy-MM-ddTHH:mm:ss");
 
                     _logger.LogInformation($"Searching: {monthStart:yyyy-MM}");
 
                     do
                     {
+                        ct.ThrowIfCancellationRequested();
+
                         var searchResponse = await graphClient.Search.Query.PostAsQueryPostResponseAsync(
                             new QueryPostRequestBody
                             {
                                 Requests = new List<SearchRequest>
                                 {
-                                new SearchRequest
-                                {
-                                    EntityTypes = new List<EntityType?> { EntityType.ListItem },
-                                    Region = "CAN",
-                                    Query = new SearchQuery
+                                    new SearchRequest
                                     {
-                                        QueryString = $"FileExtension:aspx AND NOT Author:\"System Account\" AND Created:{startCreation}..{endCreation}"
-                                    },
-                                    Fields = new List<string> 
-                                    { 
-                                        "UniqueId",
-                                        "SiteId",
-                                        "WebId",
-                                        "ListId",
-                                        "ListItemId",
-                                        "Path",
-                                        "FileName",
-                                        "Title",
-                                        "SPWebUrl",
-                                        "SPSiteUrl",
-                                        "SiteTitle",
-                                        "PromotedState",
-                                        "Created",
-                                        "LastModifiedTime",
-                                        "Author",
-                                        "EditorOWSUSER",
-                                        "SPTranslationLanguage",
-                                        "ViewsLifeTime",
-                                        "ViewsLifeTimeUniqueUsers",
-                                        "ViewsLast1Days",
-                                        "ViewsLast2Days",
-                                        "ViewsLast3Days",
-                                        "ViewsLast4Days",
-                                        "ViewsLast5Days",
-                                        "ViewsLast6Days",
-                                        "ViewsLast7Days",
-                                        "ViewsLastMonths1",
-                                        "ViewsLastMonths2",
-                                        "ViewsLastMonths3",
-                                    },
-                                    From = from,
-                                    Size = PageSize,
-                                    SortProperties = new List<SortProperty>
-                                    {
-                                        new SortProperty
+                                        EntityTypes = new List<EntityType?> { EntityType.ListItem },
+                                        Region = "CAN",
+                                        Query = new SearchQuery
                                         {
-                                            Name = "ViewsLifeTime",
-                                            IsDescending = true
+                                            QueryString = $"FileExtension:aspx AND NOT Author:\"System Account\" AND Created:{startCreation}..{endCreation}"
+                                        },
+                                        Fields = new List<string>
+                                        {
+                                            "UniqueId",
+                                            "SiteId",
+                                            "WebId",
+                                            "ListId",
+                                            "ListItemId",
+                                            "Path",
+                                            "FileName",
+                                            "Title",
+                                            "SPWebUrl",
+                                            "SPSiteUrl",
+                                            "SiteTitle",
+                                            "PromotedState",
+                                            "Created",
+                                            "LastModifiedTime",
+                                            "Author",
+                                            "EditorOWSUSER",
+                                            "SPTranslationLanguage",
+                                            "ViewsLifeTime",
+                                            "ViewsLifeTimeUniqueUsers",
+                                            "ViewsLast1Days",
+                                            "ViewsLast2Days",
+                                            "ViewsLast3Days",
+                                            "ViewsLast4Days",
+                                            "ViewsLast5Days",
+                                            "ViewsLast6Days",
+                                            "ViewsLast7Days",
+                                            "ViewsLastMonths1",
+                                            "ViewsLastMonths2",
+                                            "ViewsLastMonths3",
+                                        },
+                                        From = from,
+                                        Size = PageSize,
+                                        SortProperties = new List<SortProperty>
+                                        {
+                                            new SortProperty
+                                            {
+                                                Name = "ViewsLifeTime",
+                                                IsDescending = true
+                                            }
                                         }
                                     }
                                 }
-                                }
-                            }
+                            },
+                            cancellationToken: ct
                         );
 
                         var container = searchResponse?.Value?.FirstOrDefault()?.HitsContainers?.FirstOrDefault();
@@ -312,6 +320,8 @@ namespace GCStats
 
                         foreach (var hit in hits)
                         {
+                            ct.ThrowIfCancellationRequested();
+
                             var listItem = hit.Resource as ListItem;
 
                             if (listItem != null && listItem.Fields != null && listItem.Fields.AdditionalData != null)
@@ -323,7 +333,7 @@ namespace GCStats
                                 webIdBuffer.Add(Globals.GetField(fields, "WebId"));
                                 listIdBuffer.Add(Globals.GetField(fields, "ListId"));
                                 listItemIdBuffer.Add(int.Parse(Globals.GetField(fields, "ListItemId")));
-                                
+
                                 pathBuffer.Add(Globals.GetField(fields, "Path"));
                                 fileNameBuffer.Add(Globals.GetField(fields, "FileName"));
                                 titleBuffer.Add(Globals.GetField(fields, "Title"));
@@ -377,9 +387,18 @@ namespace GCStats
 
                 return blobName;
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("StreamPageViewsToBlobAsync was cancelled");
+
+                await Globals.DeletePartialBlob(PageViewsContainerName, blobName, _logger, _config);
+                throw;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+
+                _logger.LogError(ex, "StreamPageViewsToBlobAsync failed");
+                await Globals.DeletePartialBlob(PageViewsContainerName, blobName, _logger, _config);
                 throw;
             }
         }
