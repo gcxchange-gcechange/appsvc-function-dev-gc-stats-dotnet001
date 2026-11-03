@@ -11,7 +11,7 @@ jobs:
   - job: sync
     uses:
      repositories:
-       - 'repo name'
+       - 'appsvc-function-dev-gc-stats-dotnet001'
     steps:
     - script: |
         echo Sync azure repo
