@@ -1,21 +1,26 @@
 trigger:
-  branches:
-    include:
-    - '*'
+- master
 
-pool:
-  name: TBS Linux Self Hosted
+resources:
+  repositories:
+  - repository: 'appsvc-function-dev-gc-stats-dotnet001'
+    type: git
+    name: 'GCExchange/appsvc-function-dev-gc-stats-dotnet001'
+pool: TBS Linux Self Hosted
+jobs:
+  - job: sync
+    uses:
+     repositories:
+       - 'repo name'
+    steps:
+    - script: |
+        echo Sync azure repo
+        git clone --bare https://tbs-sct:$(System.AccessToken)@dev.azure.com/tbs-sct/GCExchange/_git/$REPO_NAME Sync_directory
+        cd Sync_directory
+        git remote add --mirror=fetch upstream https://github.com/gcxchange-gcechange/$REPO_NAME
+        git fetch upstream --tags
+        git push origin --all
+      env:
+        REPO_NAME: "appsvc-function-dev-gc-stats-dotnet001"
+      displayName: 'Sync repo'
 
-steps:
-- script: |
-    echo Sync azure repo
-    B64_PAT=$(echo -n ":$PAT" | base64)
-    git clone --bare https://$PAT@dev.azure.com/tbs-sct/GCExchange/_git/$REPO_NAME Sync_directory
-    cd Sync_directory
-    git remote add --mirror=fetch upstream https://github.com/gcxchange-gcechange/$REPO_NAME
-    git fetch upstream --tags
-    git push https://$PAT@dev.azure.com/tbs-sct/GCExchange/_git/$REPO_NAME --all
-  env:
-    PAT: $(PAT)
-    REPO_NAME: "appsvc-function-dev-gc-stats-dotnet001"
-  displayName: 'Sync repo'
