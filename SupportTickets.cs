@@ -1,23 +1,12 @@
-﻿using Azure.Storage.Blobs;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
 using Parquet;
 using Parquet.Schema;
-using System;
-using System.Collections;
-using System.Collections.Frozen;
-using System.Collections.Generic;
 using System.Net.Http.Headers;
-using System.Numerics;
-using System.Reflection.Metadata;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using System.Xml.Linq;
 
 namespace GCStats
 {
@@ -38,13 +27,9 @@ namespace GCStats
             _config = config;
             _httpClientFactory = httpClientFactory;
             _queue = queue;
-
-
         }
 
-
         [Function("Timer_SupportTickets")]
-
         public Task Schedule([TimerTrigger(Globals.TimerStartTime)] TimerInfo timer) => _queue.EnqueueJobAsync(Name);
 
         public async Task RunAsync(CancellationToken ct)
@@ -58,25 +43,22 @@ namespace GCStats
             await _queue.SendAsync("process-support-tickets", blobName);
         }
 
-
         public async Task<string> StreamSupportTicketsToBlobAsync(CancellationToken ct)
         {
 
             int page = 1;
             int perPage = 100;
-           
 
             var snapshotDate = DateTime.UtcNow.Date;
 
             HttpClient client = _httpClientFactory.CreateClient();
 
-
             //get the key n domain
             var domain = Auth.GetAppSetting("freshDeskDomain", _logger, _config);
-            var apiKey = Auth.GetAppSetting("freshDesk_API_KEY", _logger, _config);
+            var freshDeskAPIKey = Auth.GetSecretValue("freshDeskAPISecretName", _logger, _config);
 
             //convert key 
-            string auth = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{apiKey}:X"));
+            string auth = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{freshDeskAPIKey}:X"));
 
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", auth);
             client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));

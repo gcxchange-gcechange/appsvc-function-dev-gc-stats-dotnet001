@@ -69,7 +69,6 @@ namespace GCStats
             var secretName = GetAppSetting("secretName", log, config);
             var tenantId = GetAppSetting("tenantId", log, config);
             var clientId = GetAppSetting("clientId", log, config);
-            var workspaceId = GetAppSetting("workspaceId", log, config);
 
             SecretClientOptions options = new SecretClientOptions()
             {
@@ -238,6 +237,29 @@ namespace GCStats
             }
 
             return value ?? string.Empty;
+        }
+
+        public static string GetSecretValue(string secretName, ILogger log, IConfiguration config, string? keyVaultUrl = default)
+        {
+            var isLocal = GetAppSetting("isLocal", log, config, false);
+            var vaultUrl = GetAppSetting(keyVaultUrl ?? "keyVaultUrl", log, config);
+            var secName = GetAppSetting(secretName, log, config);
+
+            var options = new SecretClientOptions()
+            {
+                Retry =
+                {
+                    Delay = TimeSpan.FromSeconds(2),
+                    MaxDelay = TimeSpan.FromSeconds(60),
+                    MaxRetries = 8,
+                    Mode = RetryMode.Exponential
+                }
+            };
+
+            var client = new SecretClient(new Uri(vaultUrl), isLocal == "true" ? new AzureCliCredential() : new DefaultAzureCredential(), options);
+            var secret = client.GetSecret(secName);
+
+            return secret.Value.Value;
         }
     }
 }

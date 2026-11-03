@@ -45,4 +45,4 @@ In order for the application to run you will need the following settings in your
 | cmSkillsListId | The listId of the Skills list in the Career Marketplace
 | isLocal | Optional. Should be set to `true` if you want to use `AzureCliCredential` for authentication. (use `az login` before running locally)
 | freshDeskDomain | The domain name of your Freshdesk instance (e.g., freshdesk.com)
-| freshDesk_API_KEY | The API key used to authenticate requests to the Freshdesk API
+| freshDeskAPISecretName | The secret name that contains the API key used to authenticate requests to the Freshdesk API
