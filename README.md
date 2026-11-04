@@ -12,7 +12,11 @@ This application saves various tenant metrics to Azure blob storage, then transf
 | User.Read.All | Application | Collection of user data
 | Sites.Read.All | Application | Collect metrics for site pages/files
 | TermStore.Read.all | Application | Read terms related to Career Marketplace 
-
+## IAM Roles
+| Role | Resource | Target
+| - | - | - |
+| Storage Blob Data Contributor | Storage Account | Function App (isLocal = false) 
+| Storage Blob Data Contributor | Storage Account | Your identity (isLocal = true) 
 ## Application Settings
 In order for the application to run you will need the following settings in your  `environment variables` of the deployed function app, or in the `local.settings.json` file in your local project.
 | Name | Description
