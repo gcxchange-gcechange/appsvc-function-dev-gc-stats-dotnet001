@@ -24,7 +24,7 @@ namespace GCStats
                 var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
                 var blobClient = await Auth.GetBlobClient(TotalUsersContainerName, blobName, log, config);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
                 var idField = new DataField<string>("Id");
                 var mailField = new DataField<string?>("Mail");
@@ -120,7 +120,6 @@ namespace GCStats
 
                 await pageIterator.IterateAsync(ct);
                 await FlushBatchAsync();
-                await parquetWriter.DisposeAsync();
 
                 log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
 

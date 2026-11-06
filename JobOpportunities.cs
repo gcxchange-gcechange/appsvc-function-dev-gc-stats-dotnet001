@@ -64,9 +64,9 @@ namespace GCStats
                 var blobClientSkills = await Auth.GetBlobClient(JobOpportunitySkillsContainerName, blobNameSkills, _logger, _config);
                 var blobClientJobType = await Auth.GetBlobClient(JobOpportunityJobTypesContainerName, blobNameJobTypes, _logger, _config);
 
-                using var blobStreamJobOpp = await blobClientJobOpp.OpenWriteAsync(overwrite: true, cancellationToken: ct);
-                using var blobStreamSkills = await blobClientSkills.OpenWriteAsync(overwrite: true, cancellationToken: ct);
-                using var blobStreamJobType = await blobClientJobType.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var blobStreamJobOpp = await blobClientJobOpp.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var blobStreamSkills = await blobClientSkills.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var blobStreamJobType = await blobClientJobType.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
                 // JobOpportunity fields
                 var idField = new DataField<int>("Id");
@@ -551,10 +551,6 @@ namespace GCStats
                 await FlushJobOpportunityBatchAsync();
                 await FlushSkillsBatchAsync();
                 await FlushJobTypeBatchAsync();
-
-                await parquetWriterJobOpp.DisposeAsync();
-                await parquetWriterSkills.DisposeAsync();
-                await parquetWriterJobType.DisposeAsync();
 
                 _logger.LogInformation($"Streamed {countJobOpp} job opportunities to {blobNameJobOpportunities}");
                 _logger.LogInformation($"Streamed {countSkills} skills to {blobNameSkills}");

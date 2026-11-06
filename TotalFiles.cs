@@ -49,7 +49,7 @@ public class TotalFiles : IJob
             var graphClient = Auth.GetGraphServiceClient(_logger);
             var blobClient = await Auth.GetBlobClient(FilesContainerName, blobName, _logger, _config);
 
-            using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+            await using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
             var idField = new DataField<string>("Id");
             var siteIdField = new DataField<string>("SiteId");
@@ -377,7 +377,6 @@ public class TotalFiles : IJob
             _logger.LogInformation($"Processed {runningTotal} total files");
 
             await FlushBatchAsync();
-            await parquetWriter.DisposeAsync();
 
             return blobName;
         }

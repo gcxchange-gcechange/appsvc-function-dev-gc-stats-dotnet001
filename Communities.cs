@@ -94,13 +94,13 @@ namespace GCStats
                 var membersBlobClient = await Auth.GetBlobClient(CommunityMembersContainerName, membersBlobName, log, config);
 
                 // Open a stream to each of the blobs and create a ParquetWriter for each of them
-                using var communitiesBlobStream = await communitiesBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var communitiesBlobStream = await communitiesBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
                 await using var communitiesWriter = await ParquetWriter.CreateAsync(communitySchema, communitiesBlobStream, Globals.ParquetOptions, cancellationToken: ct);
 
-                using var ownersBlobStream = await ownersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var ownersBlobStream = await ownersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
                 await using var ownersWriter = await ParquetWriter.CreateAsync(ownerSchema, ownersBlobStream, Globals.ParquetOptions, cancellationToken: ct);
 
-                using var membersBlobStream = await membersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var membersBlobStream = await membersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
                 await using var membersWriter = await ParquetWriter.CreateAsync(memberSchema, membersBlobStream, Globals.ParquetOptions, cancellationToken: ct);
 
                 int communitiesCount = 0;
@@ -351,10 +351,6 @@ namespace GCStats
                 await FlushCommunitiesBatchAsync();
                 await FlushOwnersBatchAsync();
                 await FlushMembersBatchAsync();
-
-                await communitiesWriter.DisposeAsync();
-                await ownersWriter.DisposeAsync();
-                await membersWriter.DisposeAsync();
 
                 log.LogInformation($"Streamed {communitiesCount} communities to {communitiesBlobName}");
                 log.LogInformation($"Streamed {ownersCount} owners to {ownersBlobName}");

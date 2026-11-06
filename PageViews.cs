@@ -49,7 +49,7 @@ namespace GCStats
                 var graphClient = Auth.GetGraphServiceClient(_logger);
                 var blobClient = await Auth.GetBlobClient(PageViewsContainerName, blobName, _logger, _config);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
                 var idField = new DataField<string>("Id");
                 var siteIdField = new DataField<string>("SiteId");
@@ -383,7 +383,6 @@ namespace GCStats
                 _logger.LogInformation($"Processed {runningTotal} total pages");
 
                 await FlushBatchAsync();
-                await parquetWriter.DisposeAsync();
 
                 return blobName;
             }

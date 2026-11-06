@@ -71,7 +71,7 @@ namespace GCStats
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
                 var schema = new ParquetSchema(userIdField, snapshotDateField);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                await using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
                 await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
 
                 var userIdBuffer = new List<string>(Globals.RowGroupBatchSize);
@@ -105,7 +105,6 @@ namespace GCStats
                 }
 
                 await FlushBatchAsync();
-                await parquetWriter.DisposeAsync();
 
                 _logger.LogInformation($"Saved {response.Value.Table.Rows.Count} active users to blob: {blobName}");
 
