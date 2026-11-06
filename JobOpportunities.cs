@@ -324,8 +324,8 @@ namespace GCStats
                 var programAreaByItem = await LoadProgramAreasAsync(graphClient, siteId, listIdJobOpp, ProgramAreaColumnName, ct: ct);
 
                 // Cache the Google Analytics events
-                var viewEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ViewJobOpportunity.json", "stats", ct: ct);
-                var applyEvents = await GetGoogleAnalyticsEvents($"GA4Report_453422813_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ApplyJobOpportunity.json", "stats", ct: ct);
+                var viewEvents = await GetGoogleAnalyticsEvents($"GA4Report_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ViewJobOpportunity.json", "stats", ct: ct);
+                var applyEvents = await GetGoogleAnalyticsEvents($"GA4Report_{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}_ApplyJobOpportunity.json", "stats", ct: ct);
 
                 // IMPORTANT: Confirm these are named the same for your environment
                 var selectColumns = new[]
