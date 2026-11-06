@@ -35,6 +35,10 @@ namespace GCStats
             var ownersBlobName = $"{CommunityOwnersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
             var membersBlobName = $"{CommunityMembersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
+            var communitiesTempBlobName = $"{communitiesBlobName}.tmp";
+            var ownersTempBlobName = $"{ownersBlobName}.tmp";
+            var membersTempBlobName = $"{membersBlobName}.tmp";
+
             try
             {
                 var graph = Auth.GetGraphServiceClient(log);
@@ -54,10 +58,7 @@ namespace GCStats
                 // Get the directory audits for group membership changes
                 var membershipChangeDates = await GetGroupMembershipChangeDatesAsync(graph, log, ct);
 
-                var storageAccountUrl = Auth.GetAppSetting("storageAccountUrl", log, config);
                 var exceptionGroupsArray = Auth.GetAppSetting("exceptionGroupsArray", log, config);
-                var isLocal = Auth.GetAppSetting("isLocal", log, config, false);
-
                 var snapshotDate = DateTime.UtcNow.Date;
 
                 // TotalCommunities Fields
@@ -82,279 +83,298 @@ namespace GCStats
                 // Shared Fields
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
-                var communitySchema = new ParquetSchema(idField, siteIdField, displayNameField, webUrlField, sensitivityLabelIdField, 
-                    creationDateField, lastActivityDateField, lastActivityDateSharePointField, lastActivityDateTeamsField, 
+                var communitySchema = new ParquetSchema(idField, siteIdField, displayNameField, webUrlField, sensitivityLabelIdField,
+                    creationDateField, lastActivityDateField, lastActivityDateSharePointField, lastActivityDateTeamsField,
                     lastActivityDateMembershipChangeField, ownerCountField, memberCountField, visibilityField, snapshotDateField);
 
                 var ownerSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
                 var memberSchema = new ParquetSchema(communityIdField, userIdField, snapshotDateField);
 
-                var communitiesBlobClient = await Auth.GetBlobClient(TotalCommunitiesContainerName, communitiesBlobName, log, config);
-                var ownersBlobClient = await Auth.GetBlobClient(CommunityOwnersContainerName, ownersBlobName, log, config);
-                var membersBlobClient = await Auth.GetBlobClient(CommunityMembersContainerName, membersBlobName, log, config);
+                var communitiesBlobClient = await Auth.GetBlobClient(TotalCommunitiesContainerName, communitiesTempBlobName, log, config);
+                var ownersBlobClient = await Auth.GetBlobClient(CommunityOwnersContainerName, ownersTempBlobName, log, config);
+                var membersBlobClient = await Auth.GetBlobClient(CommunityMembersContainerName, membersTempBlobName, log, config);
 
-                // Open a stream to each of the blobs and create a ParquetWriter for each of them
-                await using var communitiesBlobStream = await communitiesBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
-                await using var communitiesWriter = await ParquetWriter.CreateAsync(communitySchema, communitiesBlobStream, Globals.ParquetOptions, cancellationToken: ct);
+                var communitiesFinalBlobClient = await Auth.GetBlobClient(TotalCommunitiesContainerName, communitiesBlobName, log, config);
+                var ownersFinalBlobClient = await Auth.GetBlobClient(CommunityOwnersContainerName, ownersBlobName, log, config);
+                var membersFinalBlobClient = await Auth.GetBlobClient(CommunityMembersContainerName, membersBlobName, log, config);
 
-                await using var ownersBlobStream = await ownersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
-                await using var ownersWriter = await ParquetWriter.CreateAsync(ownerSchema, ownersBlobStream, Globals.ParquetOptions, cancellationToken: ct);
-
-                await using var membersBlobStream = await membersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
-                await using var membersWriter = await ParquetWriter.CreateAsync(memberSchema, membersBlobStream, Globals.ParquetOptions, cancellationToken: ct);
-
-                int communitiesCount = 0;
-                int ownersCount = 0; 
-                int membersCount = 0;
-
-                // Create the buffers and batch writes for communities, owners, and members
-                var idBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var siteIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var displayNameBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var webUrlBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var sensitivityLabelIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var creationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-                var lastActivityDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-                var lastActivityDateSharePointBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
-                var lastActivityDateTeamsBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
-                var lastActivityDateMembershipChangeBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
-                var ownerCountBuffer = new List<int>(Globals.RowGroupBatchSize);
-                var memberCountBuffer = new List<int>(Globals.RowGroupBatchSize);
-                var visibilityBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var communitySnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-
-                async Task FlushCommunitiesBatchAsync()
                 {
-                    ct.ThrowIfCancellationRequested();
+                    // Open a stream to each of the blobs and create a ParquetWriter for each of them
+                    await using var communitiesBlobStream = await communitiesBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                    await using var communitiesWriter = await ParquetWriter.CreateAsync(communitySchema, communitiesBlobStream, Globals.ParquetOptions, cancellationToken: ct);
 
-                    if (idBuffer.Count == 0)
-                        return;
+                    await using var ownersBlobStream = await ownersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                    await using var ownersWriter = await ParquetWriter.CreateAsync(ownerSchema, ownersBlobStream, Globals.ParquetOptions, cancellationToken: ct);
 
-                    using var groupWriter = communitiesWriter.CreateRowGroup();
-                    await groupWriter.WriteAsync(idField, idBuffer);
-                    await groupWriter.WriteAsync(siteIdField, siteIdBuffer);
-                    await groupWriter.WriteAsync(displayNameField, displayNameBuffer);
-                    await groupWriter.WriteAsync(webUrlField, webUrlBuffer);
-                    await groupWriter.WriteAsync(sensitivityLabelIdField, sensitivityLabelIdBuffer);
-                    await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
-                    await groupWriter.WriteAsync<DateTime>(lastActivityDateField, lastActivityDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
-                    await groupWriter.WriteAsync<DateTime>(lastActivityDateSharePointField, lastActivityDateSharePointBuffer.ToArray().AsMemory(), cancellationToken: ct);
-                    await groupWriter.WriteAsync<DateTime>(lastActivityDateTeamsField, lastActivityDateTeamsBuffer.ToArray().AsMemory(), cancellationToken: ct);
-                    await groupWriter.WriteAsync<DateTime>(lastActivityDateMembershipChangeField, lastActivityDateMembershipChangeBuffer.ToArray().AsMemory(), cancellationToken: ct);
-                    await groupWriter.WriteAsync<int>(ownerCountField, ownerCountBuffer.ToArray().AsMemory(), cancellationToken: ct);
-                    await groupWriter.WriteAsync<int>(memberCountField, memberCountBuffer.ToArray().AsMemory(), cancellationToken: ct);
-                    await groupWriter.WriteAsync(visibilityField, visibilityBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, communitySnapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                    await using var membersBlobStream = await membersBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                    await using var membersWriter = await ParquetWriter.CreateAsync(memberSchema, membersBlobStream, Globals.ParquetOptions, cancellationToken: ct);
 
-                    idBuffer.Clear();
-                    siteIdBuffer.Clear();
-                    displayNameBuffer.Clear();
-                    webUrlBuffer.Clear();
-                    sensitivityLabelIdBuffer.Clear();
-                    creationDateBuffer.Clear();
-                    lastActivityDateBuffer.Clear();
-                    lastActivityDateSharePointBuffer.Clear();
-                    lastActivityDateTeamsBuffer.Clear();
-                    lastActivityDateMembershipChangeBuffer.Clear();
-                    ownerCountBuffer.Clear();
-                    memberCountBuffer.Clear();
-                    visibilityBuffer.Clear();
-                    communitySnapshotDateBuffer.Clear();
-                }
+                    int communitiesCount = 0;
+                    int ownersCount = 0;
+                    int membersCount = 0;
 
-                var ownerUserIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var ownerCommunityIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var ownerSnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                    // Create the buffers and batch writes for communities, owners, and members
+                    var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var siteIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var displayNameBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var webUrlBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var sensitivityLabelIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var creationDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                    var lastActivityDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                    var lastActivityDateSharePointBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
+                    var lastActivityDateTeamsBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
+                    var lastActivityDateMembershipChangeBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
+                    var ownerCountBuffer = new List<int>(Globals.RowGroupBatchSize);
+                    var memberCountBuffer = new List<int>(Globals.RowGroupBatchSize);
+                    var visibilityBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var communitySnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
-                async Task FlushOwnersBatchAsync()
-                {
-                    ct.ThrowIfCancellationRequested();
+                    async Task FlushCommunitiesBatchAsync()
+                    {
+                        ct.ThrowIfCancellationRequested();
 
-                    if (ownerUserIdBuffer.Count == 0)
-                        return;
+                        if (idBuffer.Count == 0)
+                            return;
 
-                    using var groupWriter = ownersWriter.CreateRowGroup();
-                    await groupWriter.WriteAsync(communityIdField, ownerCommunityIdBuffer);
-                    await groupWriter.WriteAsync(userIdField, ownerUserIdBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, ownerSnapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        using var groupWriter = communitiesWriter.CreateRowGroup();
+                        await groupWriter.WriteAsync(idField, idBuffer);
+                        await groupWriter.WriteAsync(siteIdField, siteIdBuffer);
+                        await groupWriter.WriteAsync(displayNameField, displayNameBuffer);
+                        await groupWriter.WriteAsync(webUrlField, webUrlBuffer);
+                        await groupWriter.WriteAsync(sensitivityLabelIdField, sensitivityLabelIdBuffer);
+                        await groupWriter.WriteAsync<DateTime>(creationDateField, creationDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync<DateTime>(lastActivityDateField, lastActivityDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync<DateTime>(lastActivityDateSharePointField, lastActivityDateSharePointBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync<DateTime>(lastActivityDateTeamsField, lastActivityDateTeamsBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync<DateTime>(lastActivityDateMembershipChangeField, lastActivityDateMembershipChangeBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync<int>(ownerCountField, ownerCountBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync<int>(memberCountField, memberCountBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync(visibilityField, visibilityBuffer);
+                        await groupWriter.WriteAsync<DateTime>(snapshotDateField, communitySnapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                    ownerUserIdBuffer.Clear();
-                    ownerCommunityIdBuffer.Clear();
-                    ownerSnapshotDateBuffer.Clear();
-                }
+                        idBuffer.Clear();
+                        siteIdBuffer.Clear();
+                        displayNameBuffer.Clear();
+                        webUrlBuffer.Clear();
+                        sensitivityLabelIdBuffer.Clear();
+                        creationDateBuffer.Clear();
+                        lastActivityDateBuffer.Clear();
+                        lastActivityDateSharePointBuffer.Clear();
+                        lastActivityDateTeamsBuffer.Clear();
+                        lastActivityDateMembershipChangeBuffer.Clear();
+                        ownerCountBuffer.Clear();
+                        memberCountBuffer.Clear();
+                        visibilityBuffer.Clear();
+                        communitySnapshotDateBuffer.Clear();
+                    }
 
-                var memberUserIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var memberCommunityIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var memberSnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+                    var ownerUserIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var ownerCommunityIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var ownerSnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
-                async Task FlushMembersBatchAsync()
-                {
-                    ct.ThrowIfCancellationRequested();
+                    async Task FlushOwnersBatchAsync()
+                    {
+                        ct.ThrowIfCancellationRequested();
 
-                    if (memberUserIdBuffer.Count == 0)
-                        return;
+                        if (ownerUserIdBuffer.Count == 0)
+                            return;
 
-                    using var groupWriter = membersWriter.CreateRowGroup();
-                    await groupWriter.WriteAsync(communityIdField, memberCommunityIdBuffer);
-                    await groupWriter.WriteAsync(userIdField, memberUserIdBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, memberSnapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        using var groupWriter = ownersWriter.CreateRowGroup();
+                        await groupWriter.WriteAsync(communityIdField, ownerCommunityIdBuffer);
+                        await groupWriter.WriteAsync(userIdField, ownerUserIdBuffer);
+                        await groupWriter.WriteAsync<DateTime>(snapshotDateField, ownerSnapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
 
-                    memberUserIdBuffer.Clear();
-                    memberCommunityIdBuffer.Clear();
-                    memberSnapshotDateBuffer.Clear();
-                }
+                        ownerUserIdBuffer.Clear();
+                        ownerCommunityIdBuffer.Clear();
+                        ownerSnapshotDateBuffer.Clear();
+                    }
 
-                // Get all groups with Teams provisioning 
-                var groupsPage = await graph.Groups.GetAsync((requestConfiguration) =>
-                {
-                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                    requestConfiguration.QueryParameters.Top = 999;
-                    requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "assignedLabels", "resourceProvisioningOptions", "visibility"];
-                    requestConfiguration.QueryParameters.Filter = "resourceProvisioningOptions/Any(x:x eq 'Team')";
-                }, ct);
+                    var memberUserIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var memberCommunityIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var memberSnapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
-                var failedGroupIds = new List<string>();
+                    async Task FlushMembersBatchAsync()
+                    {
+                        ct.ThrowIfCancellationRequested();
 
-                var pageIterator = PageIterator<Group, GroupCollectionResponse>
-                    .CreatePageIterator(
-                        graph,
-                        groupsPage!,
-                        async group =>
-                        {
-                            ct.ThrowIfCancellationRequested();
+                        if (memberUserIdBuffer.Count == 0)
+                            return;
 
-                            if (group.Id != null && !exceptionGroupsArray.Contains(group.Id))
+                        using var groupWriter = membersWriter.CreateRowGroup();
+                        await groupWriter.WriteAsync(communityIdField, memberCommunityIdBuffer);
+                        await groupWriter.WriteAsync(userIdField, memberUserIdBuffer);
+                        await groupWriter.WriteAsync<DateTime>(snapshotDateField, memberSnapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+
+                        memberUserIdBuffer.Clear();
+                        memberCommunityIdBuffer.Clear();
+                        memberSnapshotDateBuffer.Clear();
+                    }
+
+                    // Get all groups with Teams provisioning 
+                    var groupsPage = await graph.Groups.GetAsync((requestConfiguration) =>
+                    {
+                        requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                        requestConfiguration.QueryParameters.Top = 999;
+                        requestConfiguration.QueryParameters.Select = ["id", "createdDateTime", "displayName", "assignedLabels", "resourceProvisioningOptions", "visibility"];
+                        requestConfiguration.QueryParameters.Filter = "resourceProvisioningOptions/Any(x:x eq 'Team')";
+                    }, ct);
+
+                    var failedGroupIds = new List<string>();
+
+                    var pageIterator = PageIterator<Group, GroupCollectionResponse>
+                        .CreatePageIterator(
+                            graph,
+                            groupsPage!,
+                            async group =>
                             {
-                                var lastActivityDate = group.CreatedDateTime?.UtcDateTime ?? DateTime.MinValue;
-                                Site? site = null;
+                                ct.ThrowIfCancellationRequested();
 
-                                try
+                                if (group.Id != null && !exceptionGroupsArray.Contains(group.Id))
                                 {
-                                    site = await graph.Groups[group.Id].Sites["root"].GetAsync(cancellationToken: ct);
+                                    var lastActivityDate = group.CreatedDateTime?.UtcDateTime ?? DateTime.MinValue;
+                                    Site? site = null;
+
+                                    try
+                                    {
+                                        site = await graph.Groups[group.Id].Sites["root"].GetAsync(cancellationToken: ct);
+                                    }
+                                    catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+                                    {
+                                        log.LogWarning($"No root site for group {group.Id}");
+                                    }
+
+                                    // Find the team owner/members
+                                    var ownersAndMembers = await GetOwnersAndMembersAsync(graph, group.Id!, log, ct);
+
+                                    // If we failed to get any members/owners then we skip writing this row. 
+                                    if (ownersAndMembers is null)
+                                    {
+                                        failedGroupIds.Add(group.Id);
+                                        log.LogWarning($"Failed to get owners/members for group {group.Id}, skipping this group.");
+                                        return true;
+                                    }
+
+                                    var (owners, members) = ownersAndMembers!.Value;
+
+                                    // Check reports for last activity data
+                                    var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id, StringComparison.OrdinalIgnoreCase));
+
+                                    var siteIdGuid = site?.Id?.Split(',').ElementAtOrDefault(1);
+                                    var sharePointUsageRecord = siteIdGuid != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(siteIdGuid, StringComparison.OrdinalIgnoreCase)) : new SharePointUsageRecord();
+
+                                    DateTime? lastActivitySP = null;
+                                    DateTime? lastActivityTeams = null;
+                                    DateTime? lastActivityMembership = null;
+
+                                    if (teamsActivityRecord != null && teamsActivityRecord.LastActivityDate != null)
+                                    {
+                                        lastActivityDate = (DateTime)teamsActivityRecord.LastActivityDate;
+                                        lastActivityTeams = lastActivityDate;
+                                    }
+
+
+                                    if (sharePointUsageRecord != null && sharePointUsageRecord.LastActivityDate != null)
+                                    {
+                                        lastActivitySP = (DateTime)sharePointUsageRecord.LastActivityDate;
+
+                                        if (lastActivitySP > lastActivityDate)
+                                            lastActivityDate = (DateTime)lastActivitySP;
+                                    }
+
+
+                                    if (membershipChangeDates.TryGetValue(group.Id, out var membershipChangeDate))
+                                    {
+                                        lastActivityMembership = membershipChangeDate;
+
+                                        if (membershipChangeDate > lastActivityDate)
+                                            lastActivityDate = membershipChangeDate;
+                                    }
+
+                                    // Add the data to be written to the Parquet files
+                                    idBuffer.Add(group.Id);
+                                    siteIdBuffer.Add(site?.Id ?? string.Empty);
+                                    displayNameBuffer.Add(group.DisplayName ?? string.Empty);
+                                    webUrlBuffer.Add(site?.WebUrl ?? string.Empty);
+                                    sensitivityLabelIdBuffer.Add(group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty);
+                                    creationDateBuffer.Add((group.CreatedDateTime ?? DateTimeOffset.MinValue).UtcDateTime);
+                                    lastActivityDateBuffer.Add(lastActivityDate);
+                                    lastActivityDateSharePointBuffer.Add(lastActivitySP);
+                                    lastActivityDateTeamsBuffer.Add(lastActivityTeams);
+                                    lastActivityDateMembershipChangeBuffer.Add(lastActivityMembership ?? null);
+                                    ownerCountBuffer.Add(owners.Length);
+                                    memberCountBuffer.Add(members.Length);
+                                    visibilityBuffer.Add(group.Visibility ?? string.Empty);
+                                    communitySnapshotDateBuffer.Add(snapshotDate);
+
+                                    foreach (var owner in owners)
+                                    {
+                                        ownerUserIdBuffer.Add(owner.Id);
+                                        ownerCommunityIdBuffer.Add(group.Id);
+                                        ownerSnapshotDateBuffer.Add(snapshotDate);
+                                    }
+
+                                    foreach (var member in members)
+                                    {
+                                        memberUserIdBuffer.Add(member.Id);
+                                        memberCommunityIdBuffer.Add(group.Id);
+                                        memberSnapshotDateBuffer.Add(snapshotDate);
+                                    }
+
+                                    // Write to blob once the buffer reaches the batch size
+                                    if (idBuffer.Count >= Globals.RowGroupBatchSize)
+                                        await FlushCommunitiesBatchAsync();
+
+                                    if (ownerUserIdBuffer.Count >= Globals.RowGroupBatchSize)
+                                        await FlushOwnersBatchAsync();
+
+                                    if (memberUserIdBuffer.Count >= Globals.RowGroupBatchSize)
+                                        await FlushMembersBatchAsync();
+
+                                    communitiesCount++;
+                                    ownersCount += owners.Length;
+                                    membersCount += members.Length;
                                 }
-                                catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
-                                {
-                                    log.LogWarning($"No root site for group {group.Id}");
-                                }
 
-                                // Find the team owner/members
-                                var ownersAndMembers = await GetOwnersAndMembersAsync(graph, group.Id!, log, ct);
+                                return true;
+                            },
+                            requestConfiguration =>
+                            {
+                                requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                                return requestConfiguration;
+                            });
 
-                                // If we failed to get any members/owners then we skip writing this row. 
-                                if (ownersAndMembers is null)
-                                {
-                                    failedGroupIds.Add(group.Id);
-                                    log.LogWarning($"Failed to get owners/members for group {group.Id}, skipping this group.");
-                                    return true;
-                                }
-
-                                var (owners, members) = ownersAndMembers!.Value;
-
-                                // Check reports for last activity data
-                                var teamsActivityRecord = teamsActivityRecords.FirstOrDefault(r => r.TeamId.Equals(group.Id, StringComparison.OrdinalIgnoreCase));
-
-                                var siteIdGuid = site?.Id?.Split(',').ElementAtOrDefault(1);
-                                var sharePointUsageRecord = siteIdGuid != null ? sharepointUsageRecords.FirstOrDefault(r => r.SiteId.Equals(siteIdGuid, StringComparison.OrdinalIgnoreCase)) : new SharePointUsageRecord();
-
-                                DateTime? lastActivitySP = null;
-                                DateTime? lastActivityTeams = null;
-                                DateTime? lastActivityMembership = null;
-
-                                if (teamsActivityRecord != null && teamsActivityRecord.LastActivityDate != null)
-                                {
-                                    lastActivityDate = (DateTime)teamsActivityRecord.LastActivityDate;
-                                    lastActivityTeams = lastActivityDate;
-                                }
-                                    
-
-                                if (sharePointUsageRecord != null && sharePointUsageRecord.LastActivityDate != null)
-                                {
-                                    lastActivitySP = (DateTime)sharePointUsageRecord.LastActivityDate;
-
-                                    if (lastActivitySP > lastActivityDate)
-                                        lastActivityDate = (DateTime)lastActivitySP;
-                                }
-                                    
-
-                                if (membershipChangeDates.TryGetValue(group.Id, out var membershipChangeDate))
-                                {
-                                    lastActivityMembership = membershipChangeDate;
-
-                                    if (membershipChangeDate > lastActivityDate)
-                                        lastActivityDate = membershipChangeDate;
-                                }
-
-                                // Add the data to be written to the Parquet files
-                                idBuffer.Add(group.Id);
-                                siteIdBuffer.Add(site?.Id ?? string.Empty);
-                                displayNameBuffer.Add(group.DisplayName ?? string.Empty);
-                                webUrlBuffer.Add(site?.WebUrl ?? string.Empty);
-                                sensitivityLabelIdBuffer.Add(group.AssignedLabels?.FirstOrDefault()?.LabelId ?? string.Empty);
-                                creationDateBuffer.Add((group.CreatedDateTime ?? DateTimeOffset.MinValue).UtcDateTime);
-                                lastActivityDateBuffer.Add(lastActivityDate);
-                                lastActivityDateSharePointBuffer.Add(lastActivitySP);
-                                lastActivityDateTeamsBuffer.Add(lastActivityTeams);
-                                lastActivityDateMembershipChangeBuffer.Add(lastActivityMembership ?? null);
-                                ownerCountBuffer.Add(owners.Length);
-                                memberCountBuffer.Add(members.Length);
-                                visibilityBuffer.Add(group.Visibility ?? string.Empty);
-                                communitySnapshotDateBuffer.Add(snapshotDate);
-
-                                foreach (var owner in owners)
-                                {
-                                    ownerUserIdBuffer.Add(owner.Id);
-                                    ownerCommunityIdBuffer.Add(group.Id);
-                                    ownerSnapshotDateBuffer.Add(snapshotDate);
-                                }
-
-                                foreach (var member in members)
-                                {
-                                    memberUserIdBuffer.Add(member.Id);
-                                    memberCommunityIdBuffer.Add(group.Id);
-                                    memberSnapshotDateBuffer.Add(snapshotDate);
-                                }
-
-                                // Write to blob once the buffer reaches the batch size
-                                if (idBuffer.Count >= Globals.RowGroupBatchSize)
-                                    await FlushCommunitiesBatchAsync();
-
-                                if (ownerUserIdBuffer.Count >= Globals.RowGroupBatchSize)
-                                    await FlushOwnersBatchAsync();
-
-                                if (memberUserIdBuffer.Count >= Globals.RowGroupBatchSize)
-                                    await FlushMembersBatchAsync();
-
-                                communitiesCount++;
-                                ownersCount += owners.Length;
-                                membersCount += members.Length;
-                            }
-
-                            return true;
-                        },
-                        requestConfiguration =>
-                        {
-                            requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                            return requestConfiguration;
-                        });
-
-                await pageIterator.IterateAsync(ct);
+                    await pageIterator.IterateAsync(ct);
 
 
-                if (failedGroupIds.Count > 0)
-                {
-                    var threshold = Math.Max(5, (int)((communitiesCount + failedGroupIds.Count) * 0.01));
+                    if (failedGroupIds.Count > 0)
+                    {
+                        var threshold = Math.Max(5, (int)((communitiesCount + failedGroupIds.Count) * 0.01));
 
-                    if (failedGroupIds.Count > threshold)
-                        throw new InvalidOperationException($"Too many groups failed ({failedGroupIds.Count}) aborting so a bad snapshot isn't published.");
+                        if (failedGroupIds.Count > threshold)
+                            throw new InvalidOperationException($"Too many groups failed ({failedGroupIds.Count}) aborting so a bad snapshot isn't published.");
+                    }
+
+                    await FlushCommunitiesBatchAsync();
+                    await FlushOwnersBatchAsync();
+                    await FlushMembersBatchAsync();
+
+                    log.LogInformation($"Streamed {communitiesCount} communities to {communitiesBlobName}");
+                    log.LogInformation($"Streamed {ownersCount} owners to {ownersBlobName}");
+                    log.LogInformation($"Streamed {membersCount} members to {membersBlobName}");
                 }
 
-                await FlushCommunitiesBatchAsync();
-                await FlushOwnersBatchAsync();
-                await FlushMembersBatchAsync();
+                var communitiesCopy = await communitiesFinalBlobClient.StartCopyFromUriAsync(communitiesBlobClient.Uri, cancellationToken: ct);
+                await communitiesCopy.WaitForCompletionAsync(ct);
 
-                log.LogInformation($"Streamed {communitiesCount} communities to {communitiesBlobName}");
-                log.LogInformation($"Streamed {ownersCount} owners to {ownersBlobName}");
-                log.LogInformation($"Streamed {membersCount} members to {membersBlobName}");
+                var ownersCopy = await ownersFinalBlobClient.StartCopyFromUriAsync(ownersBlobClient.Uri, cancellationToken: ct);
+                await ownersCopy.WaitForCompletionAsync(ct);
+
+                var membersCopy = await membersFinalBlobClient.StartCopyFromUriAsync(membersBlobClient.Uri, cancellationToken: ct);
+                await membersCopy.WaitForCompletionAsync(ct);
+
+                await communitiesBlobClient.DeleteIfExistsAsync(cancellationToken: ct);
+                await ownersBlobClient.DeleteIfExistsAsync(cancellationToken: ct);
+                await membersBlobClient.DeleteIfExistsAsync(cancellationToken: ct);
 
                 return communitiesBlobName;
             }
@@ -362,20 +382,20 @@ namespace GCStats
             {
                 log.LogWarning("StreamCommunitiesToBlobAsync was cancelled");
 
-                await Globals.DeletePartialBlob(TotalCommunitiesContainerName, communitiesBlobName, log, config);
-                await Globals.DeletePartialBlob(CommunityOwnersContainerName, ownersBlobName, log, config);
-                await Globals.DeletePartialBlob(CommunityMembersContainerName, membersBlobName, log, config);
+                await Globals.DeletePartialBlob(TotalCommunitiesContainerName, communitiesTempBlobName, log, config);
+                await Globals.DeletePartialBlob(CommunityOwnersContainerName, ownersTempBlobName, log, config);
+                await Globals.DeletePartialBlob(CommunityMembersContainerName, membersTempBlobName, log, config);
 
                 throw;
             }
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 log.LogError("StreamCommunitiesToBlobAsync failed.");
                 log.LogError(ex.Message.ToString());
 
-                await Globals.DeletePartialBlob(TotalCommunitiesContainerName, communitiesBlobName, log, config);
-                await Globals.DeletePartialBlob(CommunityOwnersContainerName, ownersBlobName, log, config);
-                await Globals.DeletePartialBlob(CommunityMembersContainerName, membersBlobName, log, config);
+                await Globals.DeletePartialBlob(TotalCommunitiesContainerName, communitiesTempBlobName, log, config);
+                await Globals.DeletePartialBlob(CommunityOwnersContainerName, ownersTempBlobName, log, config);
+                await Globals.DeletePartialBlob(CommunityMembersContainerName, membersTempBlobName, log, config);
 
                 throw;
             }

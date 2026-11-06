@@ -42,12 +42,14 @@ namespace GCStats
         public async Task<string> StreamActiveUsersToBlobAsync(CancellationToken ct = default)
         {
             var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+            var tempBlobName = $"{blobName}.tmp";
 
             try
             {
                 var snapshotDate = DateTime.UtcNow.Date;
 
-                var blobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, blobName, _logger, _config);
+                var tempBlobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, tempBlobName, _logger, _config);
+                var finalBlobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, blobName, _logger, _config);
                 var logsQueryClient = Auth.GetLogsQueryClient(_logger);
 
                 string query = @"
@@ -71,40 +73,47 @@ namespace GCStats
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
                 var schema = new ParquetSchema(userIdField, snapshotDateField);
 
-                await using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
-
-                var userIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-
-                async Task FlushBatchAsync()
                 {
-                    ct.ThrowIfCancellationRequested();
+                    await using var blobStream = await tempBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                    await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
 
-                    if (userIdBuffer.Count == 0)
-                        return;
+                    var userIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
-                    using var groupWriter = parquetWriter.CreateRowGroup();
-
-                    await groupWriter.WriteAsync(userIdField, userIdBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
-
-                    userIdBuffer.Clear();
-                    snapshotDateBuffer.Clear();
-                }
-                
-                foreach (var row in response.Value.Table.Rows)
-                {
-                    userIdBuffer.Add(row["UserId"]?.ToString() ?? string.Empty);
-                    snapshotDateBuffer.Add(snapshotDate);
-
-                    if (userIdBuffer.Count >= Globals.RowGroupBatchSize)
+                    async Task FlushBatchAsync()
                     {
-                        await FlushBatchAsync();
+                        ct.ThrowIfCancellationRequested();
+
+                        if (userIdBuffer.Count == 0)
+                            return;
+
+                        using var groupWriter = parquetWriter.CreateRowGroup();
+
+                        await groupWriter.WriteAsync(userIdField, userIdBuffer);
+                        await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+
+                        userIdBuffer.Clear();
+                        snapshotDateBuffer.Clear();
                     }
+
+                    foreach (var row in response.Value.Table.Rows)
+                    {
+                        userIdBuffer.Add(row["UserId"]?.ToString() ?? string.Empty);
+                        snapshotDateBuffer.Add(snapshotDate);
+
+                        if (userIdBuffer.Count >= Globals.RowGroupBatchSize)
+                        {
+                            await FlushBatchAsync();
+                        }
+                    }
+
+                    await FlushBatchAsync();
                 }
 
-                await FlushBatchAsync();
+                var copyOperation = await finalBlobClient.StartCopyFromUriAsync(tempBlobClient.Uri, cancellationToken: ct);
+                await copyOperation.WaitForCompletionAsync(ct);
+
+                await tempBlobClient.DeleteIfExistsAsync(cancellationToken: ct);
 
                 _logger.LogInformation($"Saved {response.Value.Table.Rows.Count} active users to blob: {blobName}");
 
@@ -114,14 +123,14 @@ namespace GCStats
             {
                 _logger.LogWarning("StreamActiveUsersToBlobAsync was cancelled");
 
-                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, blobName, _logger, _config);
+                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, tempBlobName, _logger, _config);
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex.Message);
 
-                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, blobName, _logger, _config);
+                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, tempBlobName, _logger, _config);
                 throw;
             }
         }

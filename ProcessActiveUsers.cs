@@ -5,8 +5,6 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Data;
-using System.Text.Json;
 
 namespace GCStats
 {

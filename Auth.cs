@@ -217,7 +217,6 @@ namespace GCStats
                 await containerClient.CreateIfNotExistsAsync(Azure.Storage.Blobs.Models.PublicAccessType.None);
 
                 return containerClient.GetBlobClient(blobName);
-
             }
             catch (Exception ex)
             {
