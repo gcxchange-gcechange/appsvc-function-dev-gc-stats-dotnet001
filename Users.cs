@@ -16,115 +16,137 @@ namespace GCStats
         public const string TotalUsersContainerName = "users";
         public const string ActiveUsersContainerName = "active-users";
 
-        public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config)
+        public static async Task<string> StreamUsersToBlobAsync(ILogger log, IConfiguration config, CancellationToken ct = default)
         {
+            var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+            var tempBlobName = $"{blobName}.tmp";
+
             try
             {
                 var snapshotDate = DateTime.UtcNow.Date;
-                var blobName = $"{TotalUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
-                var blobClient = await Auth.GetBlobClient(TotalUsersContainerName, blobName, log, config);
+                var blobClient = await Auth.GetBlobClient(TotalUsersContainerName, tempBlobName, log, config);
+                var blobClientFinal = await Auth.GetBlobClient(TotalUsersContainerName, blobName, log, config);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-
-                var idField = new DataField<string>("Id");
-                var mailField = new DataField<string?>("Mail");
-                var domainField = new DataField<string?>("Domain");
-                var upnField = new DataField<string?>("UserPrincipalName");
-                var createdDateTimeField = new DataField<DateTime?>("CreatedDateTime");
-                var snapshotDateField = new DataField<DateTime>("SnapshotDate");
-
-                var schema = new ParquetSchema(idField, mailField, domainField, upnField, createdDateTimeField, snapshotDateField);
-
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
-
-                var graph = Auth.GetGraphServiceClient(log);
-                int count = 0;
-
-                var idBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var mailBuffer = new List<string?>(Globals.RowGroupBatchSize);
-                var domainBuffer = new List<string?>(Globals.RowGroupBatchSize);
-                var upnBuffer = new List<string?>(Globals.RowGroupBatchSize);
-                var createdDateTimeBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
-                var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-
-                async Task FlushBatchAsync()
                 {
-                    if (idBuffer.Count == 0) 
-                        return;
+                    await using var blobStream = await blobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
 
-                    using var groupWriter = parquetWriter.CreateRowGroup();
+                    var idField = new DataField<string>("Id");
+                    var mailField = new DataField<string?>("Mail");
+                    var domainField = new DataField<string?>("Domain");
+                    var upnField = new DataField<string?>("UserPrincipalName");
+                    var createdDateTimeField = new DataField<DateTime?>("CreatedDateTime");
+                    var snapshotDateField = new DataField<DateTime>("SnapshotDate");
 
-                    await groupWriter.WriteAsync(idField, idBuffer);
-                    await groupWriter.WriteAsync(mailField, mailBuffer);
-                    await groupWriter.WriteAsync(domainField, domainBuffer);
-                    await groupWriter.WriteAsync(upnField, upnBuffer);
-                    await groupWriter.WriteAsync<DateTime>(createdDateTimeField, createdDateTimeBuffer.ToArray().AsMemory());
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
+                    var schema = new ParquetSchema(idField, mailField, domainField, upnField, createdDateTimeField, snapshotDateField);
 
-                    idBuffer.Clear();
-                    mailBuffer.Clear();
-                    domainBuffer.Clear();
-                    upnBuffer.Clear();
-                    createdDateTimeBuffer.Clear();
-                    snapshotDateBuffer.Clear();
+                    await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
+
+                    var graph = Auth.GetGraphServiceClient(log);
+                    int count = 0;
+
+                    var idBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var mailBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                    var domainBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                    var upnBuffer = new List<string?>(Globals.RowGroupBatchSize);
+                    var createdDateTimeBuffer = new List<DateTime?>(Globals.RowGroupBatchSize);
+                    var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
+
+                    async Task FlushBatchAsync()
+                    {
+                        ct.ThrowIfCancellationRequested();
+
+                        if (idBuffer.Count == 0)
+                            return;
+
+                        using var groupWriter = parquetWriter.CreateRowGroup();
+
+                        await groupWriter.WriteAsync(idField, idBuffer);
+                        await groupWriter.WriteAsync(mailField, mailBuffer);
+                        await groupWriter.WriteAsync(domainField, domainBuffer);
+                        await groupWriter.WriteAsync(upnField, upnBuffer);
+                        await groupWriter.WriteAsync<DateTime>(createdDateTimeField, createdDateTimeBuffer.ToArray().AsMemory(), cancellationToken: ct);
+                        await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+
+                        idBuffer.Clear();
+                        mailBuffer.Clear();
+                        domainBuffer.Clear();
+                        upnBuffer.Clear();
+                        createdDateTimeBuffer.Clear();
+                        snapshotDateBuffer.Clear();
+                    }
+
+                    var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
+                    {
+                        requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                        requestConfiguration.QueryParameters.Top = 999;
+                        requestConfiguration.QueryParameters.Select = [
+                            "Id",
+                            "Mail",
+                            "UserPrincipalName",
+                            "CreatedDateTime",
+                        ];
+                    }, ct);
+
+                    if (usersPage is null)
+                        throw new InvalidOperationException("Graph returned no users page; refusing to write an empty snapshot.");
+
+                    var exceptionUsersArray = Auth.GetAppSetting("exceptionUsersArray", log, config);
+
+                    var pageIterator = PageIterator<User, UserCollectionResponse>
+                        .CreatePageIterator(
+                            graph,
+                            usersPage,
+                            async user =>
+                            {
+                                ct.ThrowIfCancellationRequested();
+
+                                if (user.Id != null && !exceptionUsersArray.Contains(user.Id))
+                                {
+                                    idBuffer.Add(user.Id);
+                                    mailBuffer.Add(user.Mail);
+                                    domainBuffer.Add(GetUserDomain(user));
+                                    upnBuffer.Add(user.UserPrincipalName);
+                                    createdDateTimeBuffer.Add(user.CreatedDateTime?.UtcDateTime);
+                                    snapshotDateBuffer.Add(snapshotDate);
+                                    count++;
+
+                                    if (idBuffer.Count >= Globals.RowGroupBatchSize)
+                                        await FlushBatchAsync();
+                                }
+
+                                return true;
+                            },
+                            requestConfiguration =>
+                            {
+                                requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                                return requestConfiguration;
+                            });
+
+                    await pageIterator.IterateAsync(ct);
+                    await FlushBatchAsync();
+
+                    log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
                 }
 
-                var usersPage = await graph.Users.GetAsync((requestConfiguration) =>
-                {
-                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                    requestConfiguration.QueryParameters.Top = 999;
-                    requestConfiguration.QueryParameters.Select = [
-                        "Id", 
-                        "Mail", 
-                        "UserPrincipalName", 
-                        "CreatedDateTime", 
-                    ];
-                });
+                var copyOperation = await blobClientFinal.StartCopyFromUriAsync(blobClient.Uri, cancellationToken: ct);
+                await copyOperation.WaitForCompletionAsync(ct);
 
-                var exceptionUsersArray = Auth.GetAppSetting("exceptionUsersArray", log, config);
-
-                var pageIterator = PageIterator<User, UserCollectionResponse>
-                    .CreatePageIterator(
-                        graph,
-                        usersPage!,
-                        user =>
-                        {
-                            if (user.Id != null && !exceptionUsersArray.Contains(user.Id))
-                            {
-                                idBuffer.Add(user.Id);
-                                mailBuffer.Add(user.Mail);
-                                domainBuffer.Add(GetUserDomain(user));
-                                upnBuffer.Add(user.UserPrincipalName);
-                                createdDateTimeBuffer.Add(user.CreatedDateTime?.UtcDateTime);
-                                snapshotDateBuffer.Add(snapshotDate);
-                                count++;
-
-                                if (idBuffer.Count >= Globals.RowGroupBatchSize)
-                                {
-                                    FlushBatchAsync().GetAwaiter().GetResult();
-                                }
-                            }
-
-                            return true;
-                        },
-                        requestConfiguration =>
-                        {
-                            requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
-                            return requestConfiguration;
-                        });
-
-                await pageIterator.IterateAsync();
-                await FlushBatchAsync();
-                await parquetWriter.DisposeAsync();
-
-                log.LogInformation("Streamed {Count} users to blob {BlobName}", count, blobName);
+                await blobClient.DeleteIfExistsAsync(cancellationToken: ct);
 
                 return blobName;
             }
+            catch (OperationCanceledException)
+            {
+                log.LogWarning("StreamUsersToBlobAsync was cancelled");
+
+                await Globals.DeletePartialBlob(TotalUsersContainerName, tempBlobName, log, config);
+                throw;
+            }
             catch (Exception ex)
             {
-                log.LogError("StreamUsersToBlobAsync failed");
-                log.LogError(ex.Message);
+                log.LogError(ex, "StreamUsersToBlobAsync failed");
+
+                await Globals.DeletePartialBlob(TotalUsersContainerName, tempBlobName, log, config);
                 throw;
             }
         }
@@ -157,7 +179,7 @@ namespace GCStats
 
             var extIndex = upn.IndexOf("#EXT#", StringComparison.OrdinalIgnoreCase);
             if (extIndex < 0)
-                return null; 
+                return null;
 
             var beforeExt = upn.Substring(0, extIndex);
             var underscore = beforeExt.LastIndexOf('_');

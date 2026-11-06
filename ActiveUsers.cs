@@ -32,21 +32,24 @@ namespace GCStats
         {
             _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
-            var blobName = await StreamActiveUsersToBlobAsync();
+            var blobName = await StreamActiveUsersToBlobAsync(ct);
 
             _logger.LogInformation($"BlobName: {blobName}");
 
             await _queue.SendAsync("process-active-users", blobName);
         }
 
-        public async Task<string> StreamActiveUsersToBlobAsync()
+        public async Task<string> StreamActiveUsersToBlobAsync(CancellationToken ct = default)
         {
+            var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
+            var tempBlobName = $"{blobName}.tmp";
+
             try
             {
                 var snapshotDate = DateTime.UtcNow.Date;
-                var blobName = $"{Users.ActiveUsersContainerName}-{DateTime.UtcNow.ToString(Globals.BlobDateFormat)}.parquet";
 
-                var blobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, blobName, _logger, _config);
+                var tempBlobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, tempBlobName, _logger, _config);
+                var finalBlobClient = await Auth.GetBlobClient(Users.ActiveUsersContainerName, blobName, _logger, _config);
                 var logsQueryClient = Auth.GetLogsQueryClient(_logger);
 
                 string query = @"
@@ -62,54 +65,72 @@ namespace GCStats
                 Response<LogsQueryResult> response = await logsQueryClient.QueryWorkspaceAsync(
                     workspaceId: Auth.GetAppSetting("workspaceId", _logger, _config),
                     query: query,
-                    timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24))
+                    timeRange: new LogsQueryTimeRange(TimeSpan.FromHours(24)),
+                    cancellationToken: ct
                 );
 
                 var userIdField = new DataField<string>("UserId");
                 var snapshotDateField = new DataField<DateTime>("SnapshotDate");
                 var schema = new ParquetSchema(userIdField, snapshotDateField);
 
-                using var blobStream = await blobClient.OpenWriteAsync(overwrite: true);
-                await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions);
-
-                var userIdBuffer = new List<string>(Globals.RowGroupBatchSize);
-                var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
-
-                async Task FlushBatchAsync()
                 {
-                    if (userIdBuffer.Count == 0)
-                        return;
+                    await using var blobStream = await tempBlobClient.OpenWriteAsync(overwrite: true, cancellationToken: ct);
+                    await using var parquetWriter = await ParquetWriter.CreateAsync(schema, blobStream, Globals.ParquetOptions, cancellationToken: ct);
 
-                    using var groupWriter = parquetWriter.CreateRowGroup();
+                    var userIdBuffer = new List<string>(Globals.RowGroupBatchSize);
+                    var snapshotDateBuffer = new List<DateTime>(Globals.RowGroupBatchSize);
 
-                    await groupWriter.WriteAsync(userIdField, userIdBuffer);
-                    await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory());
-
-                    userIdBuffer.Clear();
-                    snapshotDateBuffer.Clear();
-                }
-                
-                foreach (var row in response.Value.Table.Rows)
-                {
-                    userIdBuffer.Add(row["UserId"]?.ToString() ?? string.Empty);
-                    snapshotDateBuffer.Add(snapshotDate);
-
-                    if (userIdBuffer.Count >= Globals.RowGroupBatchSize)
+                    async Task FlushBatchAsync()
                     {
-                        await FlushBatchAsync();
+                        ct.ThrowIfCancellationRequested();
+
+                        if (userIdBuffer.Count == 0)
+                            return;
+
+                        using var groupWriter = parquetWriter.CreateRowGroup();
+
+                        await groupWriter.WriteAsync(userIdField, userIdBuffer);
+                        await groupWriter.WriteAsync<DateTime>(snapshotDateField, snapshotDateBuffer.ToArray().AsMemory(), cancellationToken: ct);
+
+                        userIdBuffer.Clear();
+                        snapshotDateBuffer.Clear();
                     }
+
+                    foreach (var row in response.Value.Table.Rows)
+                    {
+                        userIdBuffer.Add(row["UserId"]?.ToString() ?? string.Empty);
+                        snapshotDateBuffer.Add(snapshotDate);
+
+                        if (userIdBuffer.Count >= Globals.RowGroupBatchSize)
+                        {
+                            await FlushBatchAsync();
+                        }
+                    }
+
+                    await FlushBatchAsync();
                 }
 
-                await FlushBatchAsync();
-                await parquetWriter.DisposeAsync();
+                var copyOperation = await finalBlobClient.StartCopyFromUriAsync(tempBlobClient.Uri, cancellationToken: ct);
+                await copyOperation.WaitForCompletionAsync(ct);
+
+                await tempBlobClient.DeleteIfExistsAsync(cancellationToken: ct);
 
                 _logger.LogInformation($"Saved {response.Value.Table.Rows.Count} active users to blob: {blobName}");
 
                 return blobName;
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("StreamActiveUsersToBlobAsync was cancelled");
+
+                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, tempBlobName, _logger, _config);
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex.Message);
+
+                await Globals.DeletePartialBlob(Users.ActiveUsersContainerName, tempBlobName, _logger, _config);
                 throw;
             }
         }
