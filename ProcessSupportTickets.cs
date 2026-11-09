@@ -1,14 +1,9 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
-using Azure.Storage.Sas;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Text;
 
 namespace GCStats
 {
@@ -16,7 +11,6 @@ namespace GCStats
     {
         private readonly ILogger<ProcessSupportTickets> _logger;
         private readonly IConfiguration _config;
-       
 
         public ProcessSupportTickets(ILogger<ProcessSupportTickets> logger, IConfiguration config)
         {
@@ -27,6 +21,7 @@ namespace GCStats
         [Function("ProcessSupportTickets")]
         public async Task Run([QueueTrigger("process-support-tickets", Connection = "AzureWebJobsStorage")] string blobName)
         {
+            _logger.LogInformation("Received blobName: {blobName}", blobName);
 
             try
             {
@@ -41,29 +36,9 @@ namespace GCStats
                 if (!await blobClient.ExistsAsync())
                     throw new FileNotFoundException($"Blob {blobName} not found in container {SupportTickets.TicketsContainerName}");
 
-                var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
-                    new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(DateTimeOffset.UtcNow.AddMinutes(15))
-                    {
-                        StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5)
-                    }
-                 );
-                var sasBuilder = new BlobSasBuilder
-                {
-                    BlobContainerName = containerClient.Name,
-                    BlobName = blobClient.Name,
-                    Resource = "b",
-                    StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
-                    ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15)
-                };
-
-                sasBuilder.SetPermissions(BlobSasPermissions.Read);
-
-                var sasToken = sasBuilder.ToSasQueryParameters(delegationKey.Value, blobServiceClient.AccountName).ToString();
+                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
-                var sasSecret = sasToken.Replace("'", "''");
-
-                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 using var copyCmd = new SqlCommand(
                     $"""
@@ -81,7 +56,7 @@ namespace GCStats
                      FROM '{blobUrl}'
                      WITH (
                          FILE_TYPE = 'PARQUET',
-                         CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
+                         CREDENTIAL = (IDENTITY = 'Workspace Identity')
                      );
                      """,
                     sqlConnection
@@ -90,15 +65,16 @@ namespace GCStats
                 copyCmd.CommandTimeout = 0;
                 await copyCmd.ExecuteNonQueryAsync();
 
-
+                _logger.LogInformation($"Successfully uploaded support tickets from {blobName} to dbo.SupportTickets");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+                _logger.LogError(ex, $"Failed to process support tickets blob {blobName}");
+
+                throw;
             }
 
+            _logger.LogInformation($"Finished processing {blobName}");
         }
-
-
     }
 }

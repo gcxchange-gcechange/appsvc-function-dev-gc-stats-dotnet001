@@ -42,27 +42,24 @@ namespace GCStats
 
                 using var copyCmd = new SqlCommand(
                     $"""
-                         COPY INTO dbo.ActiveUsers
-                         FROM '{blobUrl}'
-                         WITH (
-                             FILE_TYPE = 'PARQUET',
-                             CREDENTIAL = (IDENTITY = 'Workspace Identity')
-                         );
-                         """,
+                    COPY INTO dbo.ActiveUsers
+                    FROM '{blobUrl}'
+                    WITH (
+                        FILE_TYPE = 'PARQUET',
+                        CREDENTIAL = (IDENTITY = 'Workspace Identity')
+                    );
+                    """,
                     sqlConnection
                 );
 
                 copyCmd.CommandTimeout = 0;
                 await copyCmd.ExecuteNonQueryAsync();
 
-                _logger.LogInformation("Successfully uploaded users from {blobName} to dbo.ActiveUsers", blobName);
+                _logger.LogInformation($"Successfully uploaded users from {blobName} to dbo.ActiveUsers");
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
-                    "Failed to process active-users blob {BlobName}",
-                    blobName);
+                _logger.LogError(ex, $"Failed to process active-users blob {blobName}");
 
                 throw;
             }
