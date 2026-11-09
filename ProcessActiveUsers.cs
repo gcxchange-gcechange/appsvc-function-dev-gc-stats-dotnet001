@@ -42,38 +42,54 @@ namespace GCStats
 
                 var now = DateTimeOffset.UtcNow;
 
-                // Five minutes of clock-skew allowance.
-                // With expiry at now + 10 min, total SAS interval is 15 min.
                 var sasStartsOn = now.AddMinutes(-5);
-                var sasExpiresOn = now.AddMinutes(10);
-
-                // Must outlive the SAS.
+                var sasExpiresOn = now.AddMinutes(15);
                 var delegationKeyExpiresOn = sasExpiresOn.AddMinutes(5);
 
                 var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
-                    new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(delegationKeyExpiresOn)
+                    new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(
+                        delegationKeyExpiresOn)
                     {
                         StartsOn = sasStartsOn
-                    }
-                 );
+                    });
 
                 var sasBuilder = new BlobSasBuilder
                 {
                     BlobContainerName = containerClient.Name,
-                    BlobName = blobClient.Name,
+
+                    // Do NOT set BlobName for a container SAS.
+
                     Resource = "c",
                     Protocol = SasProtocol.Https,
                     StartsOn = sasStartsOn,
                     ExpiresOn = sasExpiresOn
                 };
-                sasBuilder.SetPermissions(BlobContainerSasPermissions.Read | BlobContainerSasPermissions.List);
 
-                var sasToken = sasBuilder.ToSasQueryParameters(delegationKey.Value, blobServiceClient.AccountName).ToString();
+                sasBuilder.SetPermissions(
+    BlobContainerSasPermissions.Read |
+    BlobContainerSasPermissions.List);
+
+                // Safe diagnostics: do not log the SAS token, signature, or SAS URI.
+                _logger.LogInformation(
+                    "Generated SAS metadata for {BlobName}: Resource={Resource}; Permissions={Permissions}; StartsOn={StartsOn:O}; ExpiresOn={ExpiresOn:O}",
+                    blobClient.Name,
+                    sasBuilder.Resource,
+                    sasBuilder.Permissions,
+                    sasBuilder.StartsOn,
+                    sasBuilder.ExpiresOn);
+
+                var sasToken = sasBuilder
+                    .ToSasQueryParameters(
+                        delegationKey.Value,
+                        blobServiceClient.AccountName)
+                    .ToString();
 
                 var sasUri = new Uri($"{blobClient.Uri}?{sasToken}");
 
+
                 try
                 {
+
                     var sasBlobClient = new BlobClient(sasUri);
                     var properties = await sasBlobClient.GetPropertiesAsync();
 
@@ -144,11 +160,12 @@ namespace GCStats
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+                _logger.LogError(
+                    ex,
+                    "Failed to process active-users blob {BlobName}",
+                    blobName);
+
                 throw;
             }
-
-            _logger.LogInformation("Finished processing {blobName}", blobName);
         }
-    }
 }
