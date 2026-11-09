@@ -1,5 +1,6 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using Azure.Storage.Sas;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
@@ -60,12 +61,12 @@ namespace GCStats
                 {
                     BlobContainerName = containerClient.Name,
                     BlobName = blobClient.Name,
-                    Resource = "b",
+                    Resource = "c",
                     Protocol = SasProtocol.Https,
                     StartsOn = sasStartsOn,
                     ExpiresOn = sasExpiresOn
                 };
-                sasBuilder.SetPermissions(BlobSasPermissions.Read);
+                sasBuilder.SetPermissions(BlobContainerSasPermissions.Read | BlobContainerSasPermissions.List);
 
                 var sasToken = sasBuilder.ToSasQueryParameters(delegationKey.Value, blobServiceClient.AccountName).ToString();
 
@@ -93,6 +94,31 @@ namespace GCStats
 
                     throw;
                 }
+
+                var sasContainerUri = new Uri($"{containerClient.Uri}?{sasToken}");
+                var sasContainerClient = new BlobContainerClient(sasContainerUri);
+
+                var foundBlob = false;
+
+                await foreach (var item in sasContainerClient.GetBlobsAsync( traits: BlobTraits.None, states: BlobStates.None, prefix: blobClient.Name, cancellationToken: CancellationToken.None))
+                {
+                    if (item.Name == blobClient.Name)
+                    {
+                        foundBlob = true;
+                        break;
+                    }
+                }
+
+                if (!foundBlob)
+                {
+                    throw new FileNotFoundException(
+                        $"SAS could list the container but did not find {blobClient.Name}");
+                }
+
+                _logger.LogInformation(
+                    "SAS read/list validation succeeded for {BlobName}",
+                    blobClient.Name);
+
 
                 var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
                 var sasSecret = sasToken.Replace("'", "''");
