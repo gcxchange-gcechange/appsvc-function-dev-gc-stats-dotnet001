@@ -1,6 +1,5 @@
 using Azure.Identity;
 using Azure.Storage.Blobs;
-using Azure.Storage.Sas;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -20,7 +19,7 @@ public class ProcessTotalFiles
     }
 
     [Function("ProcessTotalFiles")]
-    public async Task Run([QueueTrigger("process-total-files", Connection = "")] string blobName)
+    public async Task Run([QueueTrigger("process-total-files", Connection = "AzureWebJobsStorage")] string blobName)
     {
         _logger.LogInformation("Received blobName: {blobName}", blobName);
 
@@ -37,53 +36,34 @@ public class ProcessTotalFiles
             if (!await blobClient.ExistsAsync())
                 throw new FileNotFoundException($"Blob {blobName} not found in container {TotalFiles.FilesContainerName}");
 
-            var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
-                new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(DateTimeOffset.UtcNow.AddMinutes(15))
-                {
-                    StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5)
-                }
-             );
-
-            var sasBuilder = new BlobSasBuilder
-            {
-                BlobContainerName = containerClient.Name,
-                BlobName = blobClient.Name,
-                Resource = "b",
-                StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
-                ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15)
-            };
-            sasBuilder.SetPermissions(BlobSasPermissions.Read);
-
-            var sasToken = sasBuilder.ToSasQueryParameters(delegationKey.Value, blobServiceClient.AccountName).ToString();
+            using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
             var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
-            var sasSecret = sasToken.Replace("'", "''");
-
-            using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
             using var copyCmd = new SqlCommand(
                 $"""
-                     COPY INTO dbo.Files
-                     FROM '{blobUrl}'
-                     WITH (
-                         FILE_TYPE = 'PARQUET',
-                         CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
-                     );
-                     """,
+                COPY INTO dbo.Files
+                FROM '{blobUrl}'
+                WITH (
+                    FILE_TYPE = 'PARQUET',
+                    CREDENTIAL = (IDENTITY = 'Workspace Identity')
+                );
+                """,
                 sqlConnection
             );
 
             copyCmd.CommandTimeout = 0;
             await copyCmd.ExecuteNonQueryAsync();
 
-            _logger.LogInformation("Successfully uploaded items from {blobName} to dbo.Files", blobName);
+            _logger.LogInformation($"Successfully uploaded items from {blobName} to dbo.Files");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex.Message);
+            _logger.LogError(ex, $"Failed to process total files blob {blobName}");
+
             throw;
         }
 
-        _logger.LogInformation("Finished processing {blobName}", blobName);
+        _logger.LogInformation($"Finished processing {blobName}");
     }
 }

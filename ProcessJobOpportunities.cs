@@ -1,7 +1,5 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using Azure.Storage.Sas;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +12,7 @@ namespace GCStats
         private readonly ILogger<ProcessJobOpportunities> _logger;
         private readonly IConfiguration _config;
 
-        public ProcessJobOpportunities(ILogger<ProcessJobOpportunities > logger, IConfiguration config)
+        public ProcessJobOpportunities(ILogger<ProcessJobOpportunities> logger, IConfiguration config)
         {
             _logger = logger;
             _config = config;
@@ -54,49 +52,30 @@ namespace GCStats
                 if (!await jobTypesBlobClient.ExistsAsync())
                     throw new FileNotFoundException($"Blob {jobTypesBlobName} not found in container {JobOpportunities.JobOpportunityJobTypesContainerName}");
 
-                var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
-                    new BlobGetUserDelegationKeyOptions(DateTimeOffset.UtcNow.AddMinutes(15))
-                    {
-                        StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5)
-                    }
-                );
-
                 using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
-                await CopyParquetIntoTableAsync(sqlConnection, "dbo.JobOpportunities", jobOpportunitiesContainerClient, jobOpportunitiesBlobClient, delegationKey.Value, blobServiceClient.AccountName);
-                _logger.LogInformation("Successfully uploaded job opportunities from {blobName} to dbo.JobOpportunities", blobName);
+                await CopyParquetIntoTableAsync(sqlConnection, "dbo.JobOpportunities", jobOpportunitiesBlobClient);
+                _logger.LogInformation($"Successfully uploaded job opportunities from {blobName} to dbo.JobOpportunities");
 
-                await CopyParquetIntoTableAsync(sqlConnection, "dbo.JobOpportunitySkills", skillsContainerClient, skillsBlobClient, delegationKey.Value, blobServiceClient.AccountName);
-                _logger.LogInformation("Successfully uploaded skills from {blobName} to dbo.JobOpportunitySkills", skillsBlobName);
+                await CopyParquetIntoTableAsync(sqlConnection, "dbo.JobOpportunitySkills", skillsBlobClient);
+                _logger.LogInformation($"Successfully uploaded skills from {skillsBlobName} to dbo.JobOpportunitySkills");
 
-                await CopyParquetIntoTableAsync(sqlConnection, "dbo.JobOpportunityJobTypes", jobTypesContainerClient, jobTypesBlobClient, delegationKey.Value, blobServiceClient.AccountName);
-                _logger.LogInformation("Successfully uploaded job types from {blobName} to dbo.JobOpportunityJobTypes", jobTypesBlobName);
+                await CopyParquetIntoTableAsync(sqlConnection, "dbo.JobOpportunityJobTypes", jobTypesBlobClient);
+                _logger.LogInformation($"Successfully uploaded job types from {jobTypesBlobName} to dbo.JobOpportunityJobTypes");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+                _logger.LogError(ex, $"Failed to process job opportunities blob {blobName}");
+
                 throw;
             }
 
-            _logger.LogInformation("Finished processing {blobName}", blobName);
+            _logger.LogInformation($"Finished processing {blobName}");
         }
 
-        private static async Task CopyParquetIntoTableAsync(SqlConnection sqlConnection, string destinationTable, BlobContainerClient containerClient, BlobClient blobClient, UserDelegationKey delegationKey, string accountName)
+        private static async Task CopyParquetIntoTableAsync(SqlConnection sqlConnection, string destinationTable, BlobClient blobClient)
         {
-            var sasBuilder = new BlobSasBuilder
-            {
-                BlobContainerName = containerClient.Name,
-                BlobName = blobClient.Name,
-                Resource = "b",
-                StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
-                ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15)
-            };
-            sasBuilder.SetPermissions(BlobSasPermissions.Read);
-
-            var sasToken = sasBuilder.ToSasQueryParameters(delegationKey, accountName).ToString();
-
             var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
-            var sasSecret = sasToken.Replace("'", "''");
 
             using var copyCmd = new SqlCommand(
                 $"""
@@ -104,7 +83,7 @@ namespace GCStats
                  FROM '{blobUrl}'
                  WITH (
                      FILE_TYPE = 'PARQUET',
-                     CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
+                     CREDENTIAL = (IDENTITY = 'Workspace Identity')
                  );
                  """,
                 sqlConnection

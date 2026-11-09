@@ -1,12 +1,9 @@
 ﻿using Azure.Identity;
 using Azure.Storage.Blobs;
-using Azure.Storage.Sas;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Data;
-using System.Text.Json;
 
 namespace GCStats
 {
@@ -39,54 +36,33 @@ namespace GCStats
                 if (!await blobClient.ExistsAsync())
                     throw new FileNotFoundException($"Blob {blobName} not found in container {Users.ActiveUsersContainerName}");
 
-                var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
-                    new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(DateTimeOffset.UtcNow.AddMinutes(15))
-                    {
-                        StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5)
-                    }
-                 );
-
-                var sasBuilder = new BlobSasBuilder
-                {
-                    BlobContainerName = containerClient.Name,
-                    BlobName = blobClient.Name,
-                    Resource = "b",
-                    StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
-                    ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15)
-                };
-                sasBuilder.SetPermissions(BlobSasPermissions.Read);
-
-                var sasToken = sasBuilder.ToSasQueryParameters(delegationKey.Value, blobServiceClient.AccountName).ToString();
+                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
-                var sasSecret = sasToken.Replace("'", "''");
-
-                using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
                 using var copyCmd = new SqlCommand(
                     $"""
-                     COPY INTO dbo.ActiveUsers
-                     FROM '{blobUrl}'
-                     WITH (
-                         FILE_TYPE = 'PARQUET',
-                         CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
-                     );
-                     """,
+                    COPY INTO dbo.ActiveUsers
+                    FROM '{blobUrl}'
+                    WITH (
+                        FILE_TYPE = 'PARQUET',
+                        CREDENTIAL = (IDENTITY = 'Workspace Identity')
+                    );
+                    """,
                     sqlConnection
                 );
 
                 copyCmd.CommandTimeout = 0;
                 await copyCmd.ExecuteNonQueryAsync();
 
-                _logger.LogInformation("Successfully uploaded users from {blobName} to dbo.ActiveUsers", blobName);
+                _logger.LogInformation($"Successfully uploaded users from {blobName} to dbo.ActiveUsers");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex.Message);
+                _logger.LogError(ex, $"Failed to process active-users blob {blobName}");
+
                 throw;
             }
-
-            _logger.LogInformation("Finished processing {blobName}", blobName);
         }
     }
 }
