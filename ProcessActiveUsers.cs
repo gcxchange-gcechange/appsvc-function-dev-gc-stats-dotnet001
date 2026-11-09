@@ -136,20 +136,21 @@ namespace GCStats
                     blobClient.Name);
 
 
-                var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
-                var sasSecret = sasToken.Replace("'", "''");
+                
 
                 using var sqlConnection = await Auth.BuildSqlConnection(_logger, _config);
 
+                var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
+
                 using var copyCmd = new SqlCommand(
                     $"""
-                     COPY INTO dbo.ActiveUsers
-                     FROM '{blobUrl}'
-                     WITH (
-                         FILE_TYPE = 'PARQUET',
-                         CREDENTIAL = (IDENTITY = 'Shared Access Signature', SECRET = '{sasSecret}')
-                     );
-                     """,
+                         COPY INTO dbo.ActiveUsers
+                         FROM '{blobUrl}'
+                         WITH (
+                             FILE_TYPE = 'PARQUET',
+                             CREDENTIAL = (IDENTITY = 'Workspace Identity')
+                         );
+                         """,
                     sqlConnection
                 );
 
