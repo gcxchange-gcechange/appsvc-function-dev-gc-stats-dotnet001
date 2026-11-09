@@ -39,10 +39,20 @@ namespace GCStats
                 if (!await blobClient.ExistsAsync())
                     throw new FileNotFoundException($"Blob {blobName} not found in container {Users.ActiveUsersContainerName}");
 
+                var now = DateTimeOffset.UtcNow;
+
+                // Five minutes of clock-skew allowance.
+                // With expiry at now + 10 min, total SAS interval is 15 min.
+                var sasStartsOn = now.AddMinutes(-5);
+                var sasExpiresOn = now.AddMinutes(10);
+
+                // Must outlive the SAS.
+                var delegationKeyExpiresOn = sasExpiresOn.AddMinutes(5);
+
                 var delegationKey = await blobServiceClient.GetUserDelegationKeyAsync(
-                    new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(DateTimeOffset.UtcNow.AddMinutes(15))
+                    new Azure.Storage.Blobs.Models.BlobGetUserDelegationKeyOptions(delegationKeyExpiresOn)
                     {
-                        StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5)
+                        StartsOn = sasStartsOn
                     }
                  );
 
@@ -51,12 +61,38 @@ namespace GCStats
                     BlobContainerName = containerClient.Name,
                     BlobName = blobClient.Name,
                     Resource = "b",
-                    StartsOn = DateTimeOffset.UtcNow.AddMinutes(-5),
-                    ExpiresOn = DateTimeOffset.UtcNow.AddMinutes(15)
+                    Protocol = SasProtocol.Https,
+                    StartsOn = sasStartsOn,
+                    ExpiresOn = sasExpiresOn
                 };
                 sasBuilder.SetPermissions(BlobSasPermissions.Read);
 
                 var sasToken = sasBuilder.ToSasQueryParameters(delegationKey.Value, blobServiceClient.AccountName).ToString();
+
+                var sasUri = new Uri($"{blobClient.Uri}?{sasToken}");
+
+                try
+                {
+                    var sasBlobClient = new BlobClient(sasUri);
+                    var properties = await sasBlobClient.GetPropertiesAsync();
+
+                    _logger.LogInformation(
+                        "SAS validation succeeded for {BlobName}. Length={Length}; ETag={ETag}",
+                        blobClient.Name,
+                        properties.Value.ContentLength,
+                        properties.Value.ETag);
+                }
+                catch (Azure.RequestFailedException ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "SAS validation failed for {BlobName}. HTTP status={Status}; Storage error={ErrorCode}",
+                        blobClient.Name,
+                        ex.Status,
+                        ex.ErrorCode);
+
+                    throw;
+                }
 
                 var blobUrl = blobClient.Uri.ToString().Replace("'", "''");
                 var sasSecret = sasToken.Replace("'", "''");
