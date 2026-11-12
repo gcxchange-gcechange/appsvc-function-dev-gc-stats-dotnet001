@@ -26,7 +26,7 @@ namespace GCStats
         {
             _logger.LogInformation($"{Name} executed at: {DateTime.UtcNow}");
 
-            var blobName = await Communities.StreamCommunitiesToBlobAsync(_logger, _config);
+            var blobName = await Communities.StreamCommunitiesToBlobAsync(_logger, _config, ct);
 
             _logger.LogInformation($"BlobName: {blobName}");
 

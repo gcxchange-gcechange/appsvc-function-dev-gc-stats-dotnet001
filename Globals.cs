@@ -1,4 +1,6 @@
-﻿using Microsoft.Kiota.Abstractions.Serialization;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Kiota.Abstractions.Serialization;
 using Parquet;
 using System.Text.Json;
 
@@ -37,6 +39,22 @@ namespace GCStats
         {
             var value = GetField(fields, name);
             return value == "0" ? null : value;
+        }
+
+        public static async Task DeletePartialBlob(string containerName, string blobName, ILogger log, IConfiguration config)
+        {
+            try
+            {
+                var client = await Auth.GetBlobClient(containerName, blobName, log, config);
+                var deleted = await client.DeleteIfExistsAsync();
+
+                if (deleted.Value)
+                    log.LogWarning("Deleted partial blob {BlobName} from {Container}", blobName, containerName);
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Could not delete partial blob {BlobName} from {Container}", blobName, containerName);
+            }
         }
     }
 }
